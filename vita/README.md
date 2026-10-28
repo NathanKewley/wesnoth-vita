@@ -1,13 +1,15 @@
 # Wesnoth for the PS Vita
 
-A port of Battle for Wesnoth 1.18 to the PS Vita (VitaSDK, SDL2). Work in progress.
+A port of Battle for Wesnoth 1.18 to the PS Vita (VitaSDK, SDL2).
 
-Status: boots to the title screen, menus and campaigns work with the controls, and a full
-multiplayer game plays (AI vs AI tested), all in Vita3K. Text renders through the real Pango/Cairo
-stack. Heap use in a game is about 160 MB of the 256 MB reserved. **Not yet tested on hardware.**
+Status: plays well on hardware - campaigns and skirmishes, up to 60 fps on the map, about 8 s from
+the LiveArea to the title screen and a few seconds to load a game. Text renders through the real
+Pango/Cairo stack. The heap is 256 MB; a long game on a big map reaches about 200 MB, and cached
+image pixels are let go past that.
 
-Known gaps: English only (translations are not built); multiplayer hosting is off (no local
-server); in-game screenshots and the "touch" path of the controls are untested in the emulator.
+Known gaps: English only (translations are not built); hosting multiplayer is off (no local server)
+and online play is untested; add-ons nested more than four folders deep can't be installed (the
+Vita allows nine levels of folders, and add-ons start five down) and add-ons show no icons.
 
 ## Layout
 
@@ -20,7 +22,11 @@ server); in-game screenshots and the "touch" path of the controls are untested i
 | `wesnoth-vita.cmake` | Vita link setup and `.vpk` packaging, included from `src/CMakeLists.txt` |
 | `compat/` | Vita-only sources: libc fixes, ICU stubs, start-up settings, controls, exception tracing |
 | `install-data.sh` | Puts the game data at `ux0:data/wesnoth` (Vita3K, or a copy for a real Vita) |
+| `make-index.py`, `make-pack.py` | The data index and the image and sound pack (see Installing) |
+| `ftp-upload.py` | Copies the game data, index and pack to a Vita over FTP |
 | `run.sh`, `screenshot.sh` | Build and run in Vita3K; capture the emulator window |
+| `ai-test.sh`, `ai-test-summary.py` | AI-vs-AI games in Vita3K, summarised |
+| `profile-summary.py`, `core-dump.py` | Read the profiler's log lines; read a Vita crash dump |
 | `fonts.conf` | fontconfig setup, installed as `ux0:data/wesnoth/fonts.conf` |
 | `sce_sys/` | LiveArea images |
 
@@ -34,14 +40,22 @@ vita/configure.sh
 cmake --build vita/build -j$(nproc)   # -> vita/build/src/wesnoth.vpk
 ```
 
+`make-pack.py` (run by the install scripts) needs Python's Pillow and `ffmpeg`.
+
 `VITA_EXTRA_FLAGS` passed to `configure.sh` adds compiler flags, e.g. the debug switches
 `-DVITA_DEBUG_SCREENSHOTS` (heap use logged every 5 s) and `-DVITA_DEBUG_INPUT`.
 
 ## Installing
 
-1. Install `wesnoth.vpk` with VitaShell.
-2. `vita/install-data.sh copy <dir>` and copy `<dir>` to the Vita as `ux0:data/wesnoth/` (about
-   600 MB: `data`, `fonts`, `images`, `sounds`, `fonts.conf`).
+1. Install `vita/build/src/wesnoth.vpk` with VitaShell.
+2. Game data, to `ux0:data/wesnoth/` (about 700 MB), either way:
+   - over VitaShell's FTP server: `vita/ftp-upload.py <vita ip>:1337` - resumable, run it again
+     after an interruption or a data update;
+   - or `vita/install-data.sh copy <dir>` and copy `<dir>` over USB.
+
+   Both include `fonts.conf`, the data index (`vita-index.txt`, from `make-index.py`) and the image
+   and sound pack (`vita-images.pak` / `.idx`, from `make-pack.py`). The caches are checked against
+   the index, so data changed by hand needs a new index.
 
 AI-vs-AI soak tests in Vita3K: `vita/ai-test.sh "<scenario id> <sides> <turns> <minutes>" ...` plays
 each game and prints a summary (how it ended, side turns, fps, slow frames, heap, AI time,

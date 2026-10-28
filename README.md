@@ -1,3 +1,56 @@
+# Battle for Wesnoth for the PS Vita
+
+This is a fork of [The Battle for Wesnoth](https://github.com/wesnoth/wesnoth) 1.18, ported to the
+PlayStation Vita. Campaigns, skirmishes against the AI and add-ons all work on a real Vita, at up to
+60 fps, with touch and button controls.
+
+The port's code, tools and notes are in [`vita/`](vita/), and [`vita/README.md`](vita/README.md)
+covers building, installing and how the port works. The rest of this README is upstream Wesnoth's.
+
+## Installing
+
+There is no prebuilt release yet: build the `.vpk` as described in
+[`vita/README.md`](vita/README.md#building). Then:
+
+1. Install `wesnoth.vpk` with VitaShell.
+2. With VitaShell's FTP server running, copy the game data over:
+   `vita/ftp-upload.py <vita ip>:1337`. This puts about 700 MB in `ux0:data/wesnoth/` (the game
+   data, plus a pack of its images and sounds that loads much faster) and can be run again to
+   resume.
+3. Start Wesnoth from the LiveArea. The first start takes longer while it builds its caches.
+
+Needs a Vita running HENkaku (custom firmware) with VitaShell. The game runs the CPU at 500 MHz
+(444 MHz where that isn't available).
+
+## Controls
+
+| Input | Action |
+|---|---|
+| Touch, on the map | Drag to pan, tap to click (select, move, attack) |
+| Touch, elsewhere | Mouse: tap to click, drag scrollbars and sliders |
+| Left stick | Move the pointer |
+| Cross | Left click |
+| Circle | Right click (deselect, context menu) |
+| D-pad, right stick | Arrow keys: scroll the map, move through lists |
+| L / R | Zoom out / in |
+| Square | Next unit |
+| Triangle | Enter |
+| Start | Escape: game menu, cancel |
+| Select | End turn |
+
+Text boxes open the Vita's keyboard when tapped. The rear touch panel is off.
+
+## Known limitations
+
+- English only.
+- Multiplayer: hosting a game server isn't built, and online play is untested. Local games
+  against the AI work.
+- Add-ons whose folders go more than four levels deep fail to install: the Vita can't create
+  folders more than nine deep, and add-ons start five deep. Add-ons also show no icons.
+- AI turns on large maps take a while; nothing animates while the AI thinks.
+
+---
+
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 
 |Branch|CI status|

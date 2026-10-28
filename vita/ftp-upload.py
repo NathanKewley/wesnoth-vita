@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Copies Wesnoth's game data to a Vita over FTP (VitaShell's FTP server), as ux0:data/wesnoth.
+Copies Wesnoth's game data to a Vita over FTP (VitaShell's FTP server), as ux0:data/wesnoth, with
+the image and sound pack (vita/make-pack.py) and the data index (vita/make-index.py).
 
     vita/ftp-upload.py 192.168.1.10:1337
 
@@ -66,6 +67,19 @@ def main():
         with open(DONE_FILE, "a") as f:
             f.write(f"{n}\n")
         print(f"batch {n + 1}/{len(batches)} done", flush=True)
+
+    # The image and sound pack (vita/make-pack.py): one big file, sent resumably. make-pack.py adds
+    # to its end only, so after a data update just the new end goes up.
+    pack_dir = os.path.join(PORT_DIR, "build")
+    subprocess.run([sys.executable, os.path.join(PORT_DIR, "make-pack.py"), pack_dir], check=True)
+    for name, resume in (("vita-images.pak", True), ("vita-images.idx", False)):
+        result = subprocess.run(["curl", "--silent", "--show-error", "--retry", "3"]
+            + (["-C", "-"] if resume else [])
+            + ["-T", os.path.join(pack_dir, name), base + name])
+        if result.returncode != 0:
+            print(f"{name} failed (curl exit {result.returncode}); run again to resume", flush=True)
+            sys.exit(1)
+        print(f"{name} done", flush=True)
 
     print("all uploaded", flush=True)
 

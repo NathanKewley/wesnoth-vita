@@ -32,4 +32,6 @@ esac
 
 cp "$PORT/fonts.conf" "$DEST/fonts.conf"
 "$PORT/make-index.py" "$DEST/vita-index.txt"
+# Images and sound effects in one file, read without opening a file each (see make-pack.py).
+"$PORT/make-pack.py" "$DEST"
 echo "installed to $DEST"
