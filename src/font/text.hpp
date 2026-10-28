@@ -416,6 +416,15 @@ private:
 	unsigned highlight_end_offset_;
 	color_t	highlight_color_;
 
+#ifdef __vita__
+	/**
+	 * PS Vita: a hash of everything that decides the layout - not of the layout itself, like the
+	 * std::hash used for the texture cache - so a text drawn again (which GUI2 does on every
+	 * redraw) can have its size and texture without Pango laying it out again.
+	 */
+	std::size_t input_hash() const;
+#endif
+
 	/** The pixel scale, used to render high-DPI text. */
 	int pixel_scale_;
 

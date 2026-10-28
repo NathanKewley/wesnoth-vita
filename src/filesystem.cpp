@@ -21,6 +21,10 @@
 
 #include "filesystem.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include <cstdio>
+#endif
 #include "config.hpp"
 #include "deprecation.hpp"
 #include "game_config_view.hpp"
@@ -34,13 +38,20 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
+#include <mutex>
+#include <memory>
+#include <cstring>
+#include <unordered_set>
+#include <unordered_map>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/stream.hpp>
+#ifndef __vita__ // PS Vita: no processes to launch or PATH to search
 #if BOOST_VERSION >= 108800 // v2 is now default
 #  define BOOST_PROCESS_VERSION 1
 #  include <boost/process/v1/search_path.hpp>
 #else
 #  include <boost/process.hpp>
+#endif
 #endif
 
 #ifdef _WIN32
@@ -75,7 +86,9 @@ static lg::log_domain log_filesystem("filesystem");
 #define WRN_FS LOG_STREAM(warn, log_filesystem)
 #define ERR_FS LOG_STREAM(err, log_filesystem)
 
+#ifndef __vita__
 namespace bp = boost::process;
+#endif
 namespace bfs = boost::filesystem;
 using boost::system::error_code;
 
@@ -306,13 +319,152 @@ static void push_if_exists(std::vector<std::string>* vec, const bfs::path& file,
 	}
 }
 
+#ifdef __vita__
+/**
+ * PS Vita: the game's own data - the files under data, images, sounds and fonts - as listed in
+ * vita-index.txt (written by vita/make-index.py when the data is installed). Every image is searched
+ * for in a dozen or more directories, and asking the memory card each time made the first sight of
+ * every unit and terrain stall. Null when there is no index: then the card is asked.
+ */
+struct game_data_listing
+{
+	std::unordered_set<std::string> files;
+	std::unordered_set<std::string> directories;
+	/** What each directory holds, by name: true for directories. */
+	std::unordered_map<std::string, std::vector<std::pair<std::string, bool>>> children;
+};
+
+static const game_data_listing* game_data_index()
+{
+	static std::once_flag loaded;
+	static std::unique_ptr<game_data_listing> index;
+	std::call_once(loaded, [] {
+		std::ifstream in(game_config::path + "/vita-index.txt");
+		if(!in) {
+			return;
+		}
+		index = std::make_unique<game_data_listing>();
+		index->files.reserve(22000);
+		for(std::string line; std::getline(in, line);) {
+			const bool directory = !line.empty() && line.back() == '/';
+			if(directory) {
+				line.pop_back();
+			}
+			const std::size_t slash = line.rfind('/');
+			const std::string parent = slash == std::string::npos ? "" : line.substr(0, slash);
+			index->children[parent].emplace_back(line.substr(slash + 1), directory);
+			if(directory) {
+				index->directories.insert(std::move(line));
+			} else {
+				index->files.insert(std::move(line));
+			}
+		}
+	});
+	return index.get();
+}
+
+/**
+ * For a path inside the game's data: whether it exists (as a directory, if @p directory), from the
+ * index. -1 for anything else - user files, or no index - which the memory card has to answer.
+ */
+static const game_data_listing* indexed_path(const std::string& path, std::string& rel);
+
+static int indexed_existence(const std::string& path, bool directory)
+{
+	std::string rel;
+	const game_data_listing* index = indexed_path(path, rel);
+	if(!index) {
+		return -1;
+	}
+	if(index->directories.count(rel)) {
+		return 1;
+	}
+	return !directory && index->files.count(rel) ? 1 : 0;
+}
+
+/**
+ * The index, and @p rel set to the path relative to the data directory, for a path inside the
+ * game's data; null for anything else - user files, or no index - which the memory card has to answer.
+ */
+static const game_data_listing* indexed_path(const std::string& path, std::string& rel)
+{
+	const std::string& root = game_config::path; // "/data/wesnoth"
+	std::size_t start = path.compare(0, 4, "ux0:") == 0 ? 4 : 0;
+	if(path.compare(start, root.size(), root) != 0 || path.size() <= start + root.size() || path[start + root.size()] != '/') {
+		return nullptr;
+	}
+	rel = path.substr(start + root.size() + 1);
+	// The user's directory changes as the game runs, and so may the loose files at the top (the
+	// arguments and profile switches): those are for the memory card. Everything else in here is
+	// the installed game data, which the index lists in full.
+	// Hidden directories (".wesnoth1.18", where the log starts before the user directory is known)
+	// are the game's own working files too.
+	const bool in_data = rel.compare(0, 9, "userdata/") != 0 && rel != "userdata" && rel.find('/') != std::string::npos
+		&& rel[0] != '.';
+	const game_data_listing* index = in_data ? game_data_index() : nullptr;
+	if(!index) {
+		return nullptr;
+	}
+	// Paths are built by concatenation: fold "//" and drop a trailing '/'. Relative segments ("./",
+	// "../" - the preprocessor's includes have them) are left to the memory card.
+	for(std::size_t i; (i = rel.find("//")) != std::string::npos;) {
+		rel.erase(i, 1);
+	}
+	if(rel.compare(0, 2, "./") == 0 || rel.find("/./") != std::string::npos || rel.find("..") != std::string::npos
+		|| (rel.size() >= 2 && rel.compare(rel.size() - 2, 2, "/.") == 0)) {
+		return nullptr;
+	}
+	if(!rel.empty() && rel.back() == '/') {
+		rel.pop_back();
+	}
+	return index;
+}
+
+/**
+ * Whether the answer for a path in the user's directory can be remembered: the places images and
+ * data are searched for there (add-ons and the like) do not change while the game runs, unlike
+ * saves, logs, caches and the preferences file.
+ */
+static bool cached_existence(const std::string& path)
+{
+	static const std::string userdata = "/data/wesnoth/userdata/";
+	const std::size_t at = path.find(userdata);
+	if(at == std::string::npos) {
+		return false;
+	}
+	const std::string rel = path.substr(at + userdata.size());
+	const std::size_t slash = rel.find('/');
+	if(slash == std::string::npos) {
+		return false;
+	}
+	static const std::string changing[] {"saves", "logs", "cache", "persist", "editor"};
+	for(const std::string& dir : changing) {
+		if(rel.compare(0, slash, dir) == 0 && dir.size() == slash) {
+			return false;
+		}
+	}
+	return true;
+}
+#endif
+
 static inline bool error_except_not_found(const error_code& ec)
 {
+#ifdef __vita__
+	// The PS Vita's C library reports a path through a missing directory as EINVAL, not ENOENT.
+	if(ec == boost::system::errc::invalid_argument) {
+		return false;
+	}
+#endif
 	return ec && ec != boost::system::errc::no_such_file_or_directory;
 }
 
 static bool is_directory_internal(const bfs::path& fpath)
 {
+#ifdef __vita__
+	if(const int indexed = indexed_existence(fpath.string(), true); indexed >= 0) {
+		return indexed == 1;
+	}
+#endif
 	error_code ec;
 	bool is_dir = bfs::is_directory(fpath, ec);
 	if(error_except_not_found(ec)) {
@@ -322,14 +474,48 @@ static bool is_directory_internal(const bfs::path& fpath)
 	return is_dir;
 }
 
+
 static bool file_exists(const bfs::path& fpath)
 {
+#ifdef __vita__
+	if(const int indexed = indexed_existence(fpath.string(), false); indexed >= 0) {
+		return indexed == 1;
+	}
+	// Loading screens do their work on a second thread while the first keeps drawing.
+	static std::mutex known_mutex;
+	static std::unordered_map<std::string, bool> known;
+	const std::string key = fpath.string();
+	const bool cacheable = cached_existence(key);
+	if(cacheable) {
+		std::lock_guard lock(known_mutex);
+		if(auto it = known.find(key); it != known.end()) {
+			return it->second;
+		}
+	}
+#endif
+#ifdef __vita__
+	// Nothing can be in a directory that is not there - and the search directories for add-ons
+	// mostly are not - so the parent is asked first, which is one question per directory instead
+	// of one per file.
+	if(cacheable && fpath.has_parent_path() && cached_existence(fpath.parent_path().string())
+		&& !file_exists(fpath.parent_path())) {
+		std::lock_guard lock(known_mutex);
+		known.emplace(key, false);
+		return false;
+	}
+#endif
 	error_code ec;
 	bool exists = bfs::exists(fpath, ec);
 	if(error_except_not_found(ec)) {
 		ERR_FS << "Failed to check existence of file " << fpath.string() << ": " << ec.message();
 	}
 
+#ifdef __vita__
+	if(cacheable) {
+		std::lock_guard lock(known_mutex);
+		known.emplace(key, exists);
+	}
+#endif
 	return exists;
 }
 
@@ -439,75 +625,105 @@ void get_files_in_dir(const std::string& dir,
 		}
 	}
 
-	error_code ec;
-	bfs::directory_iterator di(dirpath, ec);
-	bfs::directory_iterator end;
-
-	// Probably not a directory, let the caller deal with it.
-	if(ec) {
-		return;
-	}
-
-	for(; di != end; ++di) {
-		ec.clear();
-		bfs::file_status st = di->status(ec);
-		if(ec) {
-			LOG_FS << "Failed to get file status of " << di->path().string() << ": " << ec.message();
-			continue;
-		}
-
-		if(st.type() == bfs::regular_file) {
-			{
-				std::string basename = di->path().filename().string();
-				if(filter == filter_mode::SKIP_PBL_FILES && looks_like_pbl(basename))
-					continue;
-				if(!basename.empty() && basename[0] == '.')
-					continue;
-			}
-
-			push_if_exists(files, di->path(), mode == name_mode::ENTIRE_FILE_PATH);
-
-			if(checksum != nullptr) {
-				std::time_t mtime = bfs::last_write_time(di->path(), ec);
-				if(ec) {
-					LOG_FS << "Failed to read modification time of " << di->path().string() << ": " << ec.message();
-				} else if(mtime > checksum->modified) {
-					checksum->modified = mtime;
-				}
-
-				uintmax_t size = bfs::file_size(di->path(), ec);
-				if(ec) {
-					LOG_FS << "Failed to read filesize of " << di->path().string() << ": " << ec.message();
-				} else {
-					checksum->sum_size += size;
-				}
-
-				checksum->nfiles++;
-			}
-		} else if(st.type() == bfs::directory_file) {
-			std::string basename = di->path().filename().string();
-
-			if(!basename.empty() && basename[0] == '.') {
+#ifdef __vita__
+	// PS Vita: the game's own data directories listed from the index, not the memory card (unless a
+	// checksum wants the files' sizes and times). Same rules as below: hidden entries, .pbl files and
+	// media directories left out, directories with a _main.cfg given as that file.
+	std::string rel;
+	const game_data_listing* index = checksum == nullptr ? indexed_path(dirpath.string(), rel) : nullptr;
+	const auto listing = index ? index->children.find(rel) : decltype(index->children.end()){};
+	if(index && index->directories.count(rel) && listing != index->children.end()) {
+		for(const auto& [basename, directory] : listing->second) {
+			if(basename.empty() || basename[0] == '.') {
 				continue;
 			}
-
-			if(filter == filter_mode::SKIP_MEDIA_DIR && (basename == "images" || basename == "sounds")) {
+			if(!directory) {
+				if(filter == filter_mode::SKIP_PBL_FILES && looks_like_pbl(basename)) {
+					continue;
+				}
+				push_if_exists(files, dirpath / basename, mode == name_mode::ENTIRE_FILE_PATH);
+			} else if(filter == filter_mode::SKIP_MEDIA_DIR && (basename == "images" || basename == "sounds")) {
 				continue;
-			}
-
-			const bfs::path inner_main(di->path() / maincfg_filename);
-			bfs::file_status main_st = bfs::status(inner_main, ec);
-
-			if(error_except_not_found(ec)) {
-				LOG_FS << "Failed to get file status of " << inner_main.string() << ": " << ec.message();
-			} else if(reorder == reorder_mode::DO_REORDER && main_st.type() == bfs::regular_file) {
-				LOG_FS << "_main.cfg found : "
-					   << (mode == name_mode::ENTIRE_FILE_PATH ? inner_main.string() : inner_main.filename().string());
-				push_if_exists(files, inner_main, mode == name_mode::ENTIRE_FILE_PATH);
+			} else if(reorder == reorder_mode::DO_REORDER && index->files.count(rel + "/" + basename + "/" + maincfg_filename)) {
+				push_if_exists(files, dirpath / basename / maincfg_filename, mode == name_mode::ENTIRE_FILE_PATH);
 			} else {
-				push_if_exists(dirs, di->path(), mode == name_mode::ENTIRE_FILE_PATH);
+				push_if_exists(dirs, dirpath / basename, mode == name_mode::ENTIRE_FILE_PATH);
 			}
 		}
+	} else
+#endif
+	{
+		error_code ec;
+		bfs::directory_iterator di(dirpath, ec);
+		bfs::directory_iterator end;
+
+		// Probably not a directory, let the caller deal with it.
+		if(ec) {
+			return;
+		}
+
+		for(; di != end; ++di) {
+			ec.clear();
+			bfs::file_status st = di->status(ec);
+			if(ec) {
+				LOG_FS << "Failed to get file status of " << di->path().string() << ": " << ec.message();
+				continue;
+			}
+
+			if(st.type() == bfs::regular_file) {
+				{
+					std::string basename = di->path().filename().string();
+					if(filter == filter_mode::SKIP_PBL_FILES && looks_like_pbl(basename))
+						continue;
+					if(!basename.empty() && basename[0] == '.')
+						continue;
+				}
+
+				push_if_exists(files, di->path(), mode == name_mode::ENTIRE_FILE_PATH);
+
+				if(checksum != nullptr) {
+					std::time_t mtime = bfs::last_write_time(di->path(), ec);
+					if(ec) {
+						LOG_FS << "Failed to read modification time of " << di->path().string() << ": " << ec.message();
+					} else if(mtime > checksum->modified) {
+						checksum->modified = mtime;
+					}
+
+					uintmax_t size = bfs::file_size(di->path(), ec);
+					if(ec) {
+						LOG_FS << "Failed to read filesize of " << di->path().string() << ": " << ec.message();
+					} else {
+						checksum->sum_size += size;
+					}
+
+					checksum->nfiles++;
+				}
+			} else if(st.type() == bfs::directory_file) {
+				std::string basename = di->path().filename().string();
+
+				if(!basename.empty() && basename[0] == '.') {
+					continue;
+				}
+
+				if(filter == filter_mode::SKIP_MEDIA_DIR && (basename == "images" || basename == "sounds")) {
+					continue;
+				}
+
+				const bfs::path inner_main(di->path() / maincfg_filename);
+				bfs::file_status main_st = bfs::status(inner_main, ec);
+
+				if(error_except_not_found(ec)) {
+					LOG_FS << "Failed to get file status of " << inner_main.string() << ": " << ec.message();
+				} else if(reorder == reorder_mode::DO_REORDER && main_st.type() == bfs::regular_file) {
+					LOG_FS << "_main.cfg found : "
+						   << (mode == name_mode::ENTIRE_FILE_PATH ? inner_main.string() : inner_main.filename().string());
+					push_if_exists(files, inner_main, mode == name_mode::ENTIRE_FILE_PATH);
+				} else {
+					push_if_exists(dirs, di->path(), mode == name_mode::ENTIRE_FILE_PATH);
+				}
+			}
+		}
+
 	}
 
 	if(files != nullptr) {
@@ -1030,6 +1246,7 @@ std::string get_exe_dir()
 		}
 	}
 
+#ifndef __vita__
 	// check the PATH for wesnoth's location
 	// with version
 	std::string version = std::to_string(game_config::wesnoth_version.major_version()) + "." + std::to_string(game_config::wesnoth_version.minor_version());
@@ -1045,6 +1262,7 @@ std::string get_exe_dir()
 	if(!search.string().empty()) {
 		return search.parent_path().string();
 	}
+#endif
 
 	// return the current working directory
 	return get_cwd();
@@ -1186,6 +1404,15 @@ filesystem::scoped_istream istream_file(const std::string& fname, bool treat_fai
 filesystem::scoped_ostream ostream_file(const std::string& fname, std::ios_base::openmode mode, bool create_directory)
 {
 	LOG_FS << "streaming " << fname << " for writing.";
+#ifdef __vita__
+	// PS Vita: replacing a file, remove it first instead of relying on the open truncating it: under
+	// Vita3K it does not, and a shorter save index or save kept the old one's end after its own,
+	// which made it unreadable.
+	// (A sink always writes; mode only says how: binary, appending...)
+	if(!(mode & (std::ios_base::app | std::ios_base::in | std::ios_base::ate))) {
+		std::remove(fname.c_str());
+	}
+#endif
 	try {
 		boost::iostreams::file_descriptor_sink fd(bfs::path(fname), mode);
 		return std::make_unique<boost::iostreams::stream<boost::iostreams::file_descriptor_sink>>(fd, 4096, 0);
@@ -1197,6 +1424,10 @@ filesystem::scoped_ostream ostream_file(const std::string& fname, std::ios_base:
 			return ostream_file(fname, mode, false);
 		}
 
+#ifdef __vita__
+		// Which file: the add-on installer, for one, only reports that one failed.
+		ERR_FS << "could not open '" << fname << "' for writing: " << e.what();
+#endif
 		throw filesystem::io_exception(e.what());
 	}
 }
@@ -1430,6 +1661,14 @@ std::set<std::string> binary_paths;
 typedef std::map<std::string, std::vector<std::string>> paths_map;
 paths_map binary_paths_cache;
 
+#ifdef __vita__
+// PS Vita: where each binary file was found, by type and name. Every lookup tries every binary path
+// (a dozen or more), and the same images are looked up again and again. Forgotten along with the
+// binary paths.
+std::unordered_map<std::string, std::string> binary_file_locations;
+std::mutex binary_file_locations_mutex;
+#endif
+
 } // namespace
 
 static void init_binary_paths()
@@ -1479,6 +1718,12 @@ void binary_paths_manager::set_paths(const game_config_view& cfg)
 void binary_paths_manager::cleanup()
 {
 	binary_paths_cache.clear();
+#ifdef __vita__
+	{
+		std::lock_guard lock(binary_file_locations_mutex);
+		binary_file_locations.clear();
+	}
+#endif
 
 	for(const std::string& p : paths_) {
 		binary_paths.erase(p);
@@ -1488,6 +1733,10 @@ void binary_paths_manager::cleanup()
 void clear_binary_paths_cache()
 {
 	binary_paths_cache.clear();
+#ifdef __vita__
+	std::lock_guard lock(binary_file_locations_mutex);
+	binary_file_locations.clear();
+#endif
 }
 
 static bool is_legal_file(const std::string& filename_str)
@@ -1568,6 +1817,9 @@ const std::vector<std::string>& get_binary_paths(const std::string& type)
 
 std::string get_binary_file_location(const std::string& type, const std::string& filename)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost timer{"file search"};
+#endif
 	// We define ".." as "remove everything before" this is needed because
 	// on the one hand allowing ".." would be a security risk but
 	// especially for terrains the c++ engine puts a hardcoded "terrain/" before filename
@@ -1584,6 +1836,16 @@ std::string get_binary_file_location(const std::string& type, const std::string&
 	if(!is_legal_file(filename)) {
 		return std::string();
 	}
+
+#ifdef __vita__
+	const std::string memo_key = type + '\n' + filename;
+	{
+		std::lock_guard lock(binary_file_locations_mutex);
+		if(const auto it = binary_file_locations.find(memo_key); it != binary_file_locations.end()) {
+			return it->second;
+		}
+	}
+#endif
 
 	std::string result;
 	for(const std::string& bp : get_binary_paths(type)) {
@@ -1604,6 +1866,12 @@ std::string get_binary_file_location(const std::string& type, const std::string&
 	}
 
 	DBG_FS << "  not found";
+#ifdef __vita__
+	{
+		std::lock_guard lock(binary_file_locations_mutex);
+		binary_file_locations.emplace(memo_key, result);
+	}
+#endif
 	return result;
 }
 

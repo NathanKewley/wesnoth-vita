@@ -22,6 +22,10 @@
 
 #include "gui/widgets/window_private.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "config.hpp"
 #include "cursor.hpp"
 #include "draw.hpp"
@@ -718,6 +722,9 @@ void window::defer_region(const rect& screen_region)
 
 void window::render()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"gui render"};
+#endif
 	// Ensure our render texture is correctly sized.
 	update_render_textures();
 
@@ -859,6 +866,9 @@ void window::remove_linked_widget(const std::string& id, const widget* wgt)
 
 void window::layout()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"gui layout"};
+#endif
 	if(!need_layout_) {
 		return;
 	}

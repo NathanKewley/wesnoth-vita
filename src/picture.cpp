@@ -20,6 +20,11 @@
 
 #include "picture.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-pack.hpp"
+#include "../vita/compat/vita-profile.hpp"
+#include <typeinfo>
+#endif
 #include "config.hpp"
 #include "display.hpp"
 #include "filesystem.hpp"
@@ -230,6 +235,17 @@ mini_terrain_cache_map mini_terrain_cache;
 mini_terrain_cache_map mini_fogged_terrain_cache;
 mini_terrain_cache_map mini_highlighted_terrain_cache;
 
+#ifdef __vita__
+void flush_surfaces()
+{
+	for(surface_cache& cache : surfaces_) {
+		cache.flush();
+	}
+	lit_surfaces_.flush();
+	surface_lightmaps_.clear();
+}
+#endif
+
 void flush_cache()
 {
 	for(surface_cache& cache : surfaces_) {
@@ -365,8 +381,12 @@ static void add_localized_overlay(const std::string& ovr_file, surface& orig_sur
 	sdl_blit(ovr_surf, 0, orig_surf, &area);
 }
 
+
 static surface load_image_file(const image::locator& loc)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost timer{"image load"};
+#endif
 	surface res;
 	const std::string& name = loc.get_filename();
 
@@ -393,8 +413,33 @@ static surface load_image_file(const image::locator& loc)
 				location = loc_location;
 			}
 
+#ifdef __vita__
+			// PS Vita: the whole file in one read, then decoded from memory. Through a C++ stream,
+			// SDL_image's many small reads each went to the memory card.
+			std::vector<char> bytes;
+			{
+				const vita_profile::scoped_cost read_timer{"image read"};
+				if(vita_pack::read(location, bytes)) {
+					// From the pack: no file to open.
+				} else if(FILE* file = std::fopen(location.c_str(), "rb")) {
+					std::fseek(file, 0, SEEK_END);
+					const long size = std::ftell(file);
+					std::fseek(file, 0, SEEK_SET);
+					if(size > 0) {
+						bytes.resize(size);
+						bytes.resize(std::fread(bytes.data(), 1, size, file));
+					}
+					std::fclose(file);
+				}
+			}
+			if(!bytes.empty()) {
+				const vita_profile::scoped_cost decode_timer{"image decode"};
+				res = IMG_Load_RW(SDL_RWFromConstMem(bytes.data(), bytes.size()), true);
+			}
+#else
 			filesystem::rwops_ptr rwops = filesystem::make_read_RWops(location);
 			res = IMG_Load_RW(rwops.release(), true); // SDL takes ownership of rwops
+#endif
 
 			// If there was no standalone localized image, check if there is an overlay.
 			if(res && loc_location.empty()) {
@@ -419,6 +464,9 @@ static surface load_image_file(const image::locator& loc)
 
 static surface load_image_sub_file(const image::locator& loc)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost timer{"image modify"};
+#endif
 	surface surf = get_surface(loc.get_filename(), UNSCALED);
 	if(surf == nullptr) {
 		return nullptr;
@@ -430,7 +478,13 @@ static surface load_image_sub_file(const image::locator& loc)
 		modification* mod = mods.top();
 
 		try {
+#ifdef __vita__
+			const auto mod_start = vita_profile::clock_us();
 			surf = (*mod)(surf);
+			vita_profile::cost(typeid(*mod).name(), vita_profile::clock_us() - mod_start);
+#else
+			surf = (*mod)(surf);
+#endif
 		} catch(const image::modification::imod_exception& e) {
 			std::ostringstream ss;
 			ss << "\n";

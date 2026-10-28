@@ -1,0 +1,7 @@
+#!/bin/sh
+# pkg-config for the Vita: only the SDK's packages, with each package's prefix taken from where its
+# .pc file is - vdpm's packages were built for /usr/local/vitasdk, not where the SDK is installed.
+VITASDK="${VITASDK:-/opt/vitasdk}"
+export PKG_CONFIG_LIBDIR="$VITASDK/arm-vita-eabi/lib/pkgconfig"
+export PKG_CONFIG_PATH=""
+exec pkgconf --define-prefix --static "$@"

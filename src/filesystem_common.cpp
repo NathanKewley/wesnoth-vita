@@ -13,6 +13,12 @@
 */
 #include <fstream>
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include "game_config.hpp"
+#include <algorithm>
+#endif
+
 #include "filesystem.hpp"
 #include "wesconfig.h"
 
@@ -306,7 +312,18 @@ const file_tree_checksum& data_tree_checksum(bool reset)
 	if (reset)
 		checksum.reset();
 	if(checksum.nfiles == 0) {
+#ifdef __vita__
+		const vita_profile::scoped_log vita_timer{"data tree checksum"};
+		// PS Vita: the game's data is checked by its index, vita-index.txt, which is written anew
+		// whenever the data is installed (vita/install-data.sh, vita/ftp-upload.py). Walking the
+		// tree took over 6 s - "data/" here was all of ux0:data, since the working directory is ux0:.
+		const std::string index = game_config::path + "/vita-index.txt";
+		checksum.nfiles = 1;
+		checksum.sum_size = std::max(file_size(index), 0);
+		checksum.modified = file_modified_time(index);
+#else
 		get_file_tree_checksum_internal("data/",checksum);
+#endif
 		get_file_tree_checksum_internal(get_user_data_dir() + "/data/",checksum);
 		LOG_FS << "calculated data tree checksum: "
 			   << checksum.nfiles << " files; "

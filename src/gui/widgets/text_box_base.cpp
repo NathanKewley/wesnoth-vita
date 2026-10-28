@@ -203,6 +203,10 @@ void text_box_base::interrupt_composition()
 {
 	ime_composing_ = false;
 	// We need to inform the IME that text input is no longer in progress.
+#ifdef __vita__
+	// The PS Vita's system keyboard does not compose, and restarting text input would open it.
+	return;
+#endif
 	SDL_StopTextInput();
 	SDL_StartTextInput();
 }
@@ -700,6 +704,11 @@ void text_box_base::signal_handler_receive_keyboard_focus(const event::ui_event 
 void text_box_base::signal_handler_lose_keyboard_focus(const event::ui_event event)
 {
 	DBG_GUI_E << LOG_HEADER << ' ' << event << ".";
+
+#ifdef __vita__
+	// The system keyboard goes with the focus (see text_box::signal_handler_left_button_down).
+	SDL_StopTextInput();
+#endif
 
 	set_state(ENABLED);
 }

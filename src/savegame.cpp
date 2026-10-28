@@ -15,6 +15,10 @@
 
 #include <boost/iostreams/filter/gzip.hpp>
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "savegame.hpp"
 
 #include "carryover.hpp"
@@ -604,6 +608,9 @@ autosave_savegame::autosave_savegame(saved_game& gamestate, const compression::f
 
 void autosave_savegame::autosave(const bool disable_autosave, const int autosave_max, const int infinite_autosaves)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"autosave"};
+#endif
 	if(disable_autosave)
 		return;
 

@@ -1,0 +1,50 @@
+--- a/meson.build	2023-12-23 00:51:46.000000000 +1100
++++ b/meson.build	2026-10-25 22:58:42.651197213 +1100
+@@ -70,7 +70,6 @@
+   ['getprogname'],
+   ['getexecname'],
+   ['rand'],
+-  ['random'],
+   ['lrand48'],
+   ['random_r'],
+   ['rand_r'],
+@@ -82,6 +81,12 @@
+   ['vprintf'],
+ ]
+ 
++# PS Vita: newlib declares random()/initstate()/setstate() but does not implement initstate and
++# setstate, which fontconfig's random() path needs; lrand48 is used instead.
++if host_machine.system() != 'vita'
++  check_funcs += [['random']]
++endif
++
+ check_freetype_funcs = [
+   ['FT_Get_BDF_Property', {'dependencies': freetype_dep}],
+   ['FT_Get_PS_Font_Info', {'dependencies': freetype_dep}],
+--- a/src/fcxml.c	2023-04-04 16:28:18.000000000 +1000
++++ b/src/fcxml.c	2026-10-25 22:58:42.651604314 +1100
+@@ -23,6 +23,11 @@
+  */
+ 
+ #include "fcint.h"
++
++#ifdef __vita__
++/* No symlinks on the Vita: the old-config-location migration that uses one just fails. */
++#define symlink(target, linkpath) (errno = ENOSYS, -1)
++#endif
+ #include <string.h>
+ #include <fcntl.h>
+ #include <stdarg.h>
+--- a/src/fcatomic.c	2022-12-05 23:57:09.000000000 +1100
++++ b/src/fcatomic.c	2026-10-27 23:57:32.885376654 +1100
+@@ -138,7 +138,9 @@
+ 	return FcFalse;
+     }
+     ret = link ((char *) atomic->tmp, (char *) atomic->lck);
+-    if (ret < 0 && (errno == EPERM || errno == ENOTSUP || errno == EACCES))
++    /* PS Vita: no hard links at all (ENOSYS); without this the cache was never written, and every
++     * start of the game read every font again. */
++    if (ret < 0 && (errno == EPERM || errno == ENOTSUP || errno == EACCES || errno == ENOSYS))
+     {
+ 	/* the filesystem where atomic->lck points to may not supports
+ 	 * the hard link. so better try to fallback

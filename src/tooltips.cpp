@@ -15,6 +15,10 @@
 
 #include "tooltips.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "draw_manager.hpp"
 #include "floating_label.hpp"
 #include "font/standard_colors.hpp"
@@ -42,6 +46,10 @@ struct tooltip
 	std::string message;
 	std::string action;
 	font::floating_label label;
+#ifdef __vita__
+	/** The label has been laid out and rendered (see the constructor). */
+	bool label_ready = false;
+#endif
 
 	void init_label();
 	void update_label_pos();
@@ -50,12 +58,21 @@ struct tooltip
 tooltip::tooltip(const SDL_Rect& r, const std::string& msg, const std::string& act)
 	: origin(r), message(msg), action(act), label(msg)
 {
+#ifndef __vita__
 	init_label();
+#endif
+	// PS Vita: the label is rendered the first time the tooltip is shown (select_active()) instead.
+	// The sidebar gives every piece of a report a tooltip - weapon specials, abilities, defense -
+	// and remakes them all whenever another unit is hovered; rendering all those texts up front
+	// took a large part of a second each time, for tooltips that are almost never looked at.
 	DBG_FT << "created tooltip for " << origin << " at " << loc;
 }
 
 void tooltip::init_label()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tooltip label"};
+#endif
 	const color_t bgcolor {0,0,0,192};
 	rect game_canvas = video::game_canvas();
 	unsigned int border = 10;
@@ -69,6 +86,9 @@ void tooltip::init_label()
 	label.set_border_size(border);
 
 	label.create_texture();
+#ifdef __vita__
+	label_ready = true;
+#endif
 
 	update_label_pos();
 }
@@ -214,12 +234,25 @@ bool update_tooltip(int id, const SDL_Rect& origin, const std::string& message)
 		LOG_FT << "updating tooltip " << id << " message";
 		tip.message = message;
 		tip.label = font::floating_label(message);
+#ifdef __vita__
+		tip.label_ready = false;
+		if(id == active_tooltip) {
+			tip.init_label();
+		}
+#else
 		tip.init_label();
+#endif
 	}
 	if(tip.origin != origin) {
 		DBG_FT << "updating tooltip " << id << " origin " << origin;
 		tip.origin = origin;
+#ifdef __vita__
+		if(tip.label_ready) {
+			tip.update_label_pos();
+		}
+#else
 		tip.update_label_pos();
+#endif
 	}
 	return true;
 }
@@ -270,6 +303,11 @@ static void select_active(int id)
 	tooltip& tip = tips.at(id);
 	LOG_FT << "showing tip " << id << " for " << tip.origin;
 	clear_active();
+#ifdef __vita__
+	if(!tip.label_ready) {
+		tip.init_label();
+	}
+#endif
 	active_tooltip = id;
 	tip.label.update(SDL_GetTicks());
 	raise_to_top();

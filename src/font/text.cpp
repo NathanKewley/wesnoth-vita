@@ -38,6 +38,11 @@
 #include <boost/functional/hash_fwd.hpp>
 
 #include <cassert>
+#include <unordered_map>
+#ifdef __vita__
+#include "../../vita/compat/vita-profile.hpp"
+#include <cstdio>
+#endif
 #include <cstring>
 #include <stdexcept>
 
@@ -60,11 +65,24 @@ namespace
  * to store smaller bits of text in the atlas and construct new textures from hem.
  */
 std::map<std::size_t, texture> rendered_cache{};
+
+#ifdef __vita__
+/** Size and texture of each text by pango_text::input_hash(); see there. */
+struct laid_out_text
+{
+	point size{-1, -1};
+	texture tex;
+};
+std::unordered_map<std::size_t, laid_out_text> laid_out_cache{};
+#endif
 } // anon namespace
 
 void flush_texture_cache()
 {
 	rendered_cache.clear();
+#ifdef __vita__
+	laid_out_cache.clear();
+#endif
 }
 
 pango_text::pango_text()
@@ -117,15 +135,35 @@ texture pango_text::render_and_get_texture()
 {
 	// Update our settings then hash them.
 	update_pixel_scale(); // TODO: this should be in recalculate()
+#ifdef __vita__
+	const std::size_t inputs = input_hash();
+	if(const auto it = laid_out_cache.find(inputs); it != laid_out_cache.end() && it->second.tex) {
+		return with_draw_scale(it->second.tex);
+	}
+#endif
 	recalculate();
 	const std::size_t hash = std::hash<pango_text>{}(*this);
 	// If we already have the appropriate texture in-cache, use it.
 	if(const auto iter = rendered_cache.find(hash); iter != rendered_cache.end()) {
+#ifdef __vita__
+		laid_out_cache[inputs].tex = iter->second;
+#endif
 		return with_draw_scale(iter->second);
 	}
 
+#ifdef __vita__
+	const auto render_start = vita_profile::clock_us();
+#endif
 	if(surface text_surf = create_surface(); text_surf) {
 		const auto& [new_iter, added] = rendered_cache.try_emplace(hash, std::move(text_surf));
+#ifdef __vita__
+		const auto render_us = vita_profile::clock_us() - render_start;
+		if(render_us > 30000 && vita_profile::enabled()) {
+			std::fprintf(stderr, "[vita] slow text render %llu ms, %u chars: %.40s\n", render_us / 1000,
+				unsigned(text_.size()), text_.c_str());
+		}
+		laid_out_cache[inputs].tex = new_iter->second;
+#endif
 		return with_draw_scale(new_iter->second);
 	}
 
@@ -161,10 +199,55 @@ point pango_text::to_draw_scale(const point& p) const
 point pango_text::get_size()
 {
 	update_pixel_scale(); // TODO: this should be in recalculate()
+#ifdef __vita__
+	const std::size_t inputs = input_hash();
+	if(const auto it = laid_out_cache.find(inputs); it != laid_out_cache.end() && it->second.size != point{-1, -1}) {
+		return it->second.size;
+	}
+	const auto layout_start = vita_profile::clock_us();
+	this->recalculate();
+	const auto layout_us = vita_profile::clock_us() - layout_start;
+	if(layout_us > 30000 && vita_profile::enabled()) {
+		// Which text is slow to lay out, to find what is drawn over and over.
+		std::fprintf(stderr, "[vita] slow text layout %llu ms, %u chars: %.40s\n", layout_us / 1000,
+			unsigned(text_.size()), text_.c_str());
+	}
+	const point size = to_draw_scale({rect_.width, rect_.height});
+	laid_out_cache[inputs].size = size;
+	return size;
+#else
 	this->recalculate();
 
 	return to_draw_scale({rect_.width, rect_.height});
+#endif
 }
+
+#ifdef __vita__
+std::size_t pango_text::input_hash() const
+{
+	std::size_t hash = 0;
+	boost::hash_combine(hash, text_);
+	boost::hash_combine(hash, markedup_text_);
+	boost::hash_combine(hash, link_aware_);
+	boost::hash_combine(hash, link_color_.to_rgba_bytes());
+	boost::hash_combine(hash, font_class_);
+	boost::hash_combine(hash, font_size_);
+	boost::hash_combine(hash, font_style_);
+	boost::hash_combine(hash, foreground_color_.to_rgba_bytes());
+	boost::hash_combine(hash, add_outline_);
+	boost::hash_combine(hash, maximum_width_);
+	boost::hash_combine(hash, characters_per_line_);
+	boost::hash_combine(hash, maximum_height_);
+	boost::hash_combine(hash, ellipse_mode_);
+	boost::hash_combine(hash, alignment_);
+	boost::hash_combine(hash, maximum_length_);
+	boost::hash_combine(hash, highlight_start_offset_);
+	boost::hash_combine(hash, highlight_end_offset_);
+	boost::hash_combine(hash, highlight_color_.to_rgba_bytes());
+	boost::hash_combine(hash, pixel_scale_);
+	return hash;
+}
+#endif
 
 bool pango_text::is_truncated() const
 {

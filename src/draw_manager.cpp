@@ -14,6 +14,16 @@
 
 #include "draw_manager.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include "picture.hpp"
+#include <SDL2/SDL_keyboard.h>
+#include <cstdio>
+#include <malloc.h>
+#define VITA_LAP(stage) vita_profile::lap(vita_profile::stage)
+#else
+#define VITA_LAP(stage)
+#endif
 #include "draw.hpp"
 #include "exceptions.hpp"
 #include "log.hpp"
@@ -136,6 +146,22 @@ void sparkle()
 		throw game::error("recursive draw");
 	}
 
+#ifdef __vita__
+	vita_profile::frame_begin();
+	// Images are cached for good, and over a long game they filled most of the memory. Every couple
+	// of seconds, if the heap is past 200 MB, their pixels go (the textures stay).
+	static uint32_t last_memory_check = 0;
+	if(const uint32_t now = SDL_GetTicks(); now - last_memory_check > 2000) {
+		last_memory_check = now;
+		const struct mallinfo heap = mallinfo();
+		if(heap.uordblks > 200 * 1024 * 1024) {
+			image::flush_surfaces();
+			std::fprintf(stderr, "[vita] heap %d MB: image pixels flushed, now %d MB\n", int(heap.uordblks >> 20),
+				int(mallinfo().uordblks >> 20));
+		}
+	}
+#endif
+
 	// Remove any invalidated TLDs from previous iterations or events.
 	if (tlds_need_tidying_) {
 		tidy_drawables();
@@ -144,9 +170,11 @@ void sparkle()
 
 	// Animate, process, and update state.
 	draw_manager::update();
+	VITA_LAP(UPDATE);
 
 	// Ensure layout is up-to-date.
 	draw_manager::layout();
+	VITA_LAP(LAYOUT);
 
 	// If we are running headless or executing unit tests, do not render.
 	// There are not currently any tests for actual rendering output.
@@ -157,9 +185,11 @@ void sparkle()
 
 	// Ensure any off-screen render buffers are up-to-date.
 	draw_manager::render();
+	VITA_LAP(RENDER);
 
 	// Draw to the screen.
 	bool drew_something = draw_manager::expose();
+	VITA_LAP(EXPOSE);
 
 	// If extra render passes are requested, render and draw again.
 	while (extra_pass_requested_) {
@@ -168,13 +198,26 @@ void sparkle()
 		drew_something |= draw_manager::expose();
 	}
 
+#ifdef __vita__
+	// PS Vita: the system keyboard is drawn over the game each time a frame is presented, so while
+	// it is up the screen has to be presented every frame, changed or not - otherwise it barely
+	// responded.
+	if (!drew_something && SDL_IsScreenKeyboardShown(video::get_window())) {
+		drew_something = true;
+	}
+#endif
 	if (drew_something) {
 		// We only need to flip the screen if something was drawn.
 		video::render_screen();
+		VITA_LAP(PRESENT);
 	} else {
 		wait_for_vsync();
+		VITA_LAP(IDLE);
 	}
 
+#ifdef __vita__
+	vita_profile::frame_end(drew_something);
+#endif
 	last_sparkle_ = SDL_GetTicks();
 }
 

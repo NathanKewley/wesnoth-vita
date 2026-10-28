@@ -17,6 +17,15 @@
 
 #include "gui/dialogs/title_screen.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include "font/text.hpp"
+#include "picture.hpp"
+#include <cstdio>
+#include <malloc.h>
+#include <psp2/kernel/sysmem.h>
+#endif
+
 #include "addon/manager_ui.hpp"
 #include "filesystem.hpp"
 #include "formula/string_utils.hpp"
@@ -147,6 +156,19 @@ static void debug_tooltip(window& /*window*/, bool& handled, const point& coordi
 
 void title_screen::init_callbacks()
 {
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: title screen\n", vita_profile::clock_us() / 1000);
+	// Back from a game: its images and texts are not needed here, and the add-ons manager needs
+	// the memory (it ran out after a long game, with 180 of the 256 MB still held by those caches).
+	::image::flush_cache();
+	font::flush_texture_cache();
+	SceKernelFreeMemorySizeInfo free_memory;
+	free_memory.size = sizeof(free_memory);
+	sceKernelGetFreeMemorySize(&free_memory);
+	std::fprintf(stderr, "[vita] memory: heap %d MB in use; free outside it: %d MB main, %d MB cdram, %d MB phycont\n",
+		int(mallinfo().uordblks >> 20), free_memory.size_user >> 20, free_memory.size_cdram >> 20,
+		free_memory.size_phycont >> 20);
+#endif
 	set_click_dismiss(false);
 	set_enter_disabled(true);
 	set_escape_disabled(true);

@@ -4241,7 +4241,11 @@ int game_lua_kernel::intf_delay(lua_State *L)
 	const unsigned final = SDL_GetTicks() + delay;
 	do {
 		play_controller_.play_slice(false);
+#ifndef __vita__
+		// Not on the PS Vita: drawing a frame there waits for the display's refresh already, and a
+		// sleep on top halved the frame rate (see unit_animator::wait_until()).
 		SDL_Delay(10);
+#endif
 	} while (static_cast<int>(final - SDL_GetTicks()) > 0);
 	return 0;
 }

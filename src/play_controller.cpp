@@ -21,6 +21,10 @@
 
 #include "play_controller.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "actions/advancement.hpp"
 #include "actions/create.hpp"
 #include "actions/heal.hpp"
@@ -972,6 +976,9 @@ const std::string& play_controller::select_music(bool victory) const
 
 void play_controller::check_victory()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"check victory"};
+#endif
 	if(is_linger_mode()) {
 		return;
 	}

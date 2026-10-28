@@ -70,6 +70,26 @@ void scroll_label::set_label(const t_string& lbl)
 	if(label* widget = get_internal_label()) {
 		widget->set_label(lbl);
 
+#ifdef __vita__
+		// PS Vita: once placed, the new text is laid out within this widget's own space - wrapped
+		// to its width, scrolled if longer - without asking the window. Text that didn't fit
+		// unwrapped made the whole window lay itself out again: 4 to 6 seconds in the add-ons
+		// manager, with its 800 rows, each time another add-on was picked.
+		if(get_size() != point()) {
+			// A scrollbar that is only shown on the first layout would be dropped, freeing its space,
+			// as a shorter text came in - and that does ask the window. It is kept, just hidden.
+			if(get_vertical_scrollbar_mode() == AUTO_VISIBLE_FIRST_RUN) {
+				set_vertical_scrollbar_mode(AUTO_VISIBLE);
+			}
+			const point origin = get_origin();
+			const point size = get_size();
+			layout_initialize(false);
+			request_reduce_width(size.x);
+			place(origin, size);
+			queue_redraw();
+			return;
+		}
+#endif
 		bool resize_needed = !content_resize_request();
 		if(resize_needed && get_size() != point()) {
 			place(get_origin(), get_size());

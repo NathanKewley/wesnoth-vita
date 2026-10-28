@@ -22,7 +22,11 @@
 
 #include "seed_rng.hpp"
 
+#ifdef __vita__
+#include <psp2/kernel/rng.h>
+#else
 #include <boost/nondet_random.hpp>
+#endif
 
 #include <sstream>
 #include <iomanip>
@@ -30,8 +34,15 @@
 namespace seed_rng {
 
 	uint32_t next_seed() {
+#ifdef __vita__
+		// No /dev/urandom on the PS Vita for boost::random_device to read; the kernel has a hardware RNG.
+		uint32_t seed = 0;
+		sceKernelGetRandomNumber(&seed, sizeof(seed));
+		return seed;
+#else
 		static boost::random_device rnd_;
 		return rnd_();
+#endif
 	}
 
 	std::string next_seed_str() {

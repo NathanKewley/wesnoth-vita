@@ -24,6 +24,7 @@
 #include "xBRZ/xbrz.hpp"
 
 #include <algorithm>
+#include <bitset>
 #include <cassert>
 #include <cstring>
 
@@ -873,17 +874,43 @@ surface recolor_image(surface surf, const color_range_map& map_rgb)
 	uint32_t* beg = lock.pixels();
 	uint32_t* end = beg + nsurf->w*surf->h;
 
+	// Most pixels are not in the palette. A bit per (12-bit fold of) palette colour rules them out
+	// without a hash table lookup - which costs a software division on CPUs without one, like the PS
+	// Vita's - and runs of one colour reuse the last answer.
+	std::bitset<4096> maybe_in_palette;
+	const auto fold = [](uint32_t rgb) { return (rgb ^ (rgb >> 12)) & 0xFFF; };
+	for(const auto& entry : map_rgb) {
+		maybe_in_palette.set(fold(entry.first.to_argb_bytes() & 0x00FFFFFF));
+	}
+	uint32_t last_rgb = 0;
+	uint32_t last_result = 0;
+	bool last_hit = false;
+	bool have_last = false;
+
 	while(beg != end) {
 		uint8_t alpha = (*beg) >> 24;
 
 		// Don't recolor invisible pixels.
 		if(alpha) {
 			// Palette use only RGB channels, so remove alpha
-			uint32_t oldrgb = (*beg) | 0xFF000000;
-
-			auto i = map_rgb.find(color_t::from_argb_bytes(oldrgb));
-			if(i != map_rgb.end()) {
-				*beg = (alpha << 24) | (i->second.to_argb_bytes() & 0x00FFFFFF);
+			const uint32_t rgb = (*beg) & 0x00FFFFFF;
+			if(have_last && rgb == last_rgb) {
+				if(last_hit) {
+					*beg = (alpha << 24) | last_result;
+				}
+			} else if(maybe_in_palette.test(fold(rgb))) {
+				auto i = map_rgb.find(color_t::from_argb_bytes(rgb | 0xFF000000));
+				have_last = true;
+				last_rgb = rgb;
+				last_hit = i != map_rgb.end();
+				if(last_hit) {
+					last_result = i->second.to_argb_bytes() & 0x00FFFFFF;
+					*beg = (alpha << 24) | last_result;
+				}
+			} else {
+				have_last = true;
+				last_rgb = rgb;
+				last_hit = false;
 			}
 		}
 
@@ -993,7 +1020,8 @@ surface mask_surface(const surface &surf, const surface &mask, bool* empty_resul
 	}
 
 	surface nsurf = surf.clone();
-	surface nmask = mask.clone();
+	// The mask is only read: a copy is needed only to get it into the neutral format.
+	surface nmask = mask.is_neutral() && mask->format->Amask == SDL_ALPHA_MASK ? mask : mask.clone();
 
 	if(nsurf == nullptr || nmask == nullptr) {
 		PLAIN_LOG << "could not make neutral surface...";

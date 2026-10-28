@@ -14,6 +14,13 @@
 */
 
 #include "sound.hpp"
+
+#ifdef __vita__
+#include "../vita/compat/vita-pack.hpp"
+#include "../vita/compat/vita-profile.hpp"
+#include <cstdio>
+#include <vector>
+#endif
 #include "config.hpp"
 #include "filesystem.hpp"
 #include "log.hpp"
@@ -77,7 +84,13 @@ const std::size_t n_reserved_channels = UI_sound_channel_last + 1; // sources, b
 
 // Max number of sound chunks that we want to cache
 // Keep this above number of available channels to avoid busy-looping
+#ifdef __vita__
+// PS Vita: sounds are kept decoded, a third of a megabyte a second of sound; 256 of them took a large
+// part of the memory over a long game. The ones in use are reused from the cache all the same.
+unsigned max_cached_chunks = 64;
+#else
 unsigned max_cached_chunks = 256;
+#endif
 
 std::map<Mix_Chunk*, int> chunk_usage;
 } // end anon namespace
@@ -944,8 +957,34 @@ static Mix_Chunk* load_chunk(const std::string& file, channel_group group)
 		const std::string localized = filesystem::get_localized_path(filename);
 
 		if(!filename.empty()) {
+#ifdef __vita__
+			// PS Vita: the whole file in one read, then decoded from memory. Through the stream,
+			// the decoder's many small reads each went to the memory card, and the first time a
+			// sound played (selecting a unit, a step, a hit) the game stalled for it. The pack has
+			// the sound effects already decoded (WAV), which saves ~70 ms of Vorbis decoding each.
+			const vita_profile::scoped_cost vita_timer{"sound load"};
+			const std::string& location = localized.empty() ? filename : localized;
+			std::vector<char> bytes;
+			if(vita_pack::read(location, bytes)) {
+				// From the pack: no file to open.
+			} else if(FILE* file = std::fopen(location.c_str(), "rb")) {
+				std::fseek(file, 0, SEEK_END);
+				const long size = std::ftell(file);
+				std::fseek(file, 0, SEEK_SET);
+				if(size > 0) {
+					bytes.resize(size);
+					bytes.resize(std::fread(bytes.data(), 1, size, file));
+				}
+				std::fclose(file);
+			}
+			if(!bytes.empty()) {
+				// Decoded to samples in full here, so the bytes are not needed afterwards.
+				temp_chunk.set_data(Mix_LoadWAV_RW(SDL_RWFromConstMem(bytes.data(), bytes.size()), true));
+			}
+#else
 			filesystem::rwops_ptr rwops = filesystem::make_read_RWops(localized.empty() ? filename : localized);
 			temp_chunk.set_data(Mix_LoadWAV_RW(rwops.release(), true)); // SDL takes ownership of rwops
+#endif
 		} else {
 			ERR_AUDIO << "Could not load sound file '" << file << "'.";
 			throw chunk_load_exception();

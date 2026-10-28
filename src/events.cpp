@@ -15,6 +15,9 @@
 
 #include "events.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-input.hpp"
+#endif
 #include "cursor.hpp"
 #include "desktop/clipboard.hpp"
 #include "log.hpp"
@@ -477,6 +480,10 @@ bool is_in_main_thread()
 
 void pump()
 {
+#ifdef __vita__
+	// PS Vita: the buttons become mouse and keyboard events, ahead of everything else.
+	vita_input::pump();
+#endif
 	if(!is_in_main_thread()) {
 		// Can only call this on the main thread!
 		return;

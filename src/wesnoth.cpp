@@ -83,6 +83,11 @@
 #endif
 
 #include <boost/iostreams/filtering_stream.hpp> // for filtering_stream
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include <boost/locale/localization_backend.hpp>
+#include <psp2/power.h>
+#endif
 #include <boost/program_options/errors.hpp>     // for error
 #include <boost/algorithm/string/predicate.hpp> // for checking cmdline options
 #include <optional>
@@ -95,6 +100,7 @@
 #include <ctime>     // for time, ctime, std::time_t
 #include <exception> // for exception
 #include <vector>
+#include <fstream>
 #include <iostream>
 
 //#define NO_CATCH_AT_GAME_END
@@ -755,7 +761,13 @@ static int do_gameloop(const std::vector<std::string>& args)
 		return finished;
 	}
 
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: start\n", vita_profile::clock_us() / 1000);
+#endif
 	const auto game = std::make_unique<game_launcher>(cmdline_opts);
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: game launcher made\n", vita_profile::clock_us() / 1000);
+#endif
 	const int start_ticks = SDL_GetTicks();
 
 	init_locale();
@@ -766,6 +778,9 @@ static int do_gameloop(const std::vector<std::string>& args)
 	// config error messages displayed. fonts will be re-initialized later
 	// when the language is read from the game config.
 	res = font::load_font_config();
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: fonts loaded\n", vita_profile::clock_us() / 1000);
+#endif
 	if(res == false) {
 		PLAIN_LOG << "could not initialize fonts";
 		// The most common symptom of a bogus data dir path -- warn the user.
@@ -779,7 +794,13 @@ static int do_gameloop(const std::vector<std::string>& args)
 		return 1;
 	}
 
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: language set\n", vita_profile::clock_us() / 1000);
+#endif
 	res = game->init_video();
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: video ready\n", vita_profile::clock_us() / 1000);
+#endif
 	if(res == false) {
 		PLAIN_LOG << "could not initialize display";
 		return 1;
@@ -794,6 +815,9 @@ static int do_gameloop(const std::vector<std::string>& args)
 #endif
 
 	gui2::init();
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: gui2 ready\n", vita_profile::clock_us() / 1000);
+#endif
 	const gui2::event::manager gui_event_manager;
 
 	// if the log directory is not writable, then this is the error condition so show the error message.
@@ -843,7 +867,13 @@ static int do_gameloop(const std::vector<std::string>& args)
 
 	LOG_CONFIG << "time elapsed: " << (SDL_GetTicks() - start_ticks) << " ms";
 
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: config loaded\n", vita_profile::clock_us() / 1000);
+#endif
 	plugins_manager plugins_man(new application_lua_kernel);
+#ifdef __vita__
+	std::fprintf(stderr, "[vita] at %llu ms: plugins ready\n", vita_profile::clock_us() / 1000);
+#endif
 
 	const plugins_context::reg_vec callbacks {
 		{"play_multiplayer", std::bind(&game_launcher::play_multiplayer, game.get(), game_launcher::mp_mode::CONNECT)},
@@ -876,6 +906,9 @@ static int do_gameloop(const std::vector<std::string>& args)
 			}
 		}
 
+#ifdef __vita__
+		std::fprintf(stderr, "[vita] at %llu ms: title music started\n", vita_profile::clock_us() / 1000);
+#endif
 		handle_lua_script_args(&*game, cmdline_opts);
 
 		plugins.play_slice();
@@ -1035,6 +1068,54 @@ int main(int argc, char** argv)
 	auto args = read_argv(argc, argv);
 	assert(!args.empty());
 
+#ifdef __vita__
+	// PS Vita: apps start with no arguments, so the locations are fixed here.
+	//
+	// Paths are kept in plain Unix form - "/data/wesnoth" - with the working directory on ux0:.
+	// The Vita's C library resolves a leading "/" to the root of the current device, so that is
+	// ux0:/data/wesnoth, while Boost.Filesystem sees an ordinary absolute path. Written as
+	// "ux0:data/wesnoth" it would count as relative, and Wesnoth would prefix the current directory.
+	//
+	// The log goes to userdata/logs, as on the desktop: stderr goes nowhere on a real Vita. For
+	// Vita3K, which shows stderr, put --no-log-to-file in vita-args.txt.
+	chdir("ux0:/");
+	// Full speed: CPU 500 MHz where the system allows it (444 otherwise; default 333), bus and GPU
+	// 222 MHz. A turn-based game spends little time at full load, and every bit helps the menus and
+	// the AI.
+	if(scePowerSetArmClockFrequency(500) < 0) {
+		scePowerSetArmClockFrequency(444);
+	}
+	scePowerSetBusClockFrequency(222);
+	scePowerSetGpuClockFrequency(222);
+	scePowerSetGpuXbarClockFrequency(166);
+	setenv("FONTCONFIG_FILE", "/data/wesnoth/fonts.conf", 0);
+	// The rear touch panel is too easy to brush while holding the Vita; only the screen is a mouse.
+	setenv("VITA_DISABLE_TOUCH_BACK", "1", 0);
+	// Wesnoth sets up its log before it reads --userdata-dir, in a default user directory under HOME.
+	setenv("HOME", "/data/wesnoth", 0);
+
+	// VitaSDK's ICU has no data built in (libicudata is ICU's stub), so Boost.Locale's ICU backend
+	// can neither collate nor convert, and sorting any list by name throws. Its "std" backend works
+	// from the C++ library instead: plainer case-insensitive ordering, but no ICU data needed.
+	{
+		auto locale_backends = boost::locale::localization_backend_manager::global();
+		locale_backends.select("std");
+		boost::locale::localization_backend_manager::global(locale_backends);
+	}
+	game_config::path = "/data/wesnoth";
+	args.emplace_back("--userdata-dir=/data/wesnoth/userdata");
+
+	// There is no command line on the Vita: any more arguments (log levels, debug switches) are
+	// read from this file, one per line.
+	if(std::ifstream extra_args{"/data/wesnoth/vita-args.txt"}) {
+		for(std::string line; std::getline(extra_args, line);) {
+			if(!line.empty() && line[0] != '#') {
+				args.push_back(line);
+			}
+		}
+	}
+#endif
+
 #ifdef _WIN32
 	_putenv("PANGOCAIRO_BACKEND=fontconfig");
 	_putenv("FONTCONFIG_PATH=fonts");
@@ -1138,7 +1219,9 @@ int main(int argc, char** argv)
 	// declare this here so that it will always be at the front of the event queue.
 	events::event_context global_context;
 
+#ifndef __vita__ // on the PS Vita this opens the system keyboard; text boxes start it when tapped
 	SDL_StartTextInput();
+#endif
 
 	try {
 		if(!nobanner) {

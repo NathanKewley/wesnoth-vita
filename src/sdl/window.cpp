@@ -50,6 +50,20 @@ window::window(const std::string& title,
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d11");
 #endif
 
+#ifdef __vita__
+	// SDL's default on the PS Vita is OpenGL ES through vitaGL, which compiles its shaders at run
+	// time with libshacccg.suprx - a system module many Vitas do not have, and without which vitaGL
+	// stops on an error dialog. SDL's native GXM renderer has its shaders built in.
+	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "VITA gxm");
+	// Naming a render driver turns SDL's command batching off, and then every call - Wesnoth makes
+	// thousands of clip and viewport changes a frame - goes through to the GPU on its own, at about
+	// half a millisecond each. That alone held the campaign dialog at 1 frame a second.
+	SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
+	// Lines as triangles: drawn with GXM's line primitives, button borders and everything drawn
+	// after them in the same widget (their labels) did not show up.
+	SDL_SetHint(SDL_HINT_RENDER_LINE_METHOD, "3");
+#endif
+
 	if(!SDL_CreateRenderer(window_, -1, render_flags)) {
 		throw exception("Failed to create a SDL_Renderer object.", true);
 	}

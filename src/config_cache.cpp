@@ -16,6 +16,10 @@
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
 #include "config_cache.hpp"
+
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "filesystem.hpp"
 #include "gettext.hpp"
 #include "log.hpp"
@@ -47,6 +51,10 @@ void add_builtin_defines(preproc_map& target)
 
 #if defined(MOUSE_TOUCH_EMULATION) || defined(TARGET_OS_IPHONE)
 	target["IPHONEOS"] = preproc_define();
+#endif
+
+#ifdef __vita__
+	target["PSVITA"] = preproc_define();
 #endif
 
 	target["WESNOTH_VERSION"] = preproc_define(game_config::wesnoth_version.str());
@@ -121,6 +129,9 @@ void config_cache::write_file(std::string file_path, const preproc_map& defines)
 
 void config_cache::read_file(const std::string& file_path, config& cfg)
 {
+#ifdef __vita__
+	const vita_profile::scoped_log vita_timer{"config cache file read"};
+#endif
 	filesystem::scoped_istream stream = filesystem::istream_file(file_path);
 	read_gz(cfg, *stream);
 }
@@ -141,6 +152,9 @@ void config_cache::add_defines_map_diff(preproc_map& defines_map)
 
 void config_cache::read_configs(const std::string& file_path, config& cfg, preproc_map& defines_map, abstract_validator* validator)
 {
+#ifdef __vita__
+	const vita_profile::scoped_log vita_timer{"config preprocess and read"};
+#endif
 	//read the file and then write to the cache
 	filesystem::scoped_istream stream = preprocess_file(file_path, &defines_map);
 	read(cfg, *stream, validator);

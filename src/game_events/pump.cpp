@@ -20,6 +20,10 @@
  */
 
 #include "game_events/pump.hpp"
+
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "game_events/handlers.hpp"
 
 #include "display_chat_manager.hpp"
@@ -432,6 +436,9 @@ void wml_event_pump::raise(const std::string& event,
 
 pump_result_t wml_event_pump::operator()()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"wml events"};
+#endif
 	// Quick aborts:
 	if(game_display::get_singleton() == nullptr) {
 		return pump_result_t();

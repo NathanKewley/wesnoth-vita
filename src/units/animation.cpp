@@ -1443,9 +1443,13 @@ void unit_animator::wait_until(int animation_time) const
 
 	int end_tick = animated_units_[0].my_unit->anim_comp().get_animation()->time_to_tick(animation_time);
 	while(SDL_GetTicks() < unsigned(end_tick - std::min(int(20 / speed), 20))) {
+#ifndef __vita__
+		// Not on the PS Vita: drawing a frame there already waits for the display's refresh, so a
+		// sleep on top made every frame miss the next one - moves and fights played at 30 fps.
 		if(!game_config::no_delay) {
 			SDL_Delay(std::clamp(int((animation_time - get_animation_time()) * speed), 0, 10));
 		}
+#endif
 		resources::controller->play_slice(false);
 		end_tick = animated_units_[0].my_unit->anim_comp().get_animation()->time_to_tick(animation_time);
 	}
@@ -1466,7 +1470,10 @@ void unit_animator::wait_for_end() const
 	while(!finished) {
 		resources::controller->play_slice(false);
 
+#ifndef __vita__
+		// Not on the PS Vita, as in wait_until().
 		SDL_Delay(10);
+#endif
 
 		finished = true;
 		for(const auto& anim : animated_units_) {

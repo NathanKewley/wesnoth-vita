@@ -20,6 +20,11 @@
 
 #include "terrain/builder.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include <optional>
+#endif
+
 #include "gui/dialogs/loading_screen.hpp"
 #include "picture.hpp"
 #include "log.hpp"
@@ -247,8 +252,15 @@ terrain_builder::terrain_builder(const config& level, const gamemap* m, const st
 	, terrain_by_type_()
 	, draw_border_(draw_border)
 {
+#ifdef __vita__
+	std::optional<vita_profile::scoped_log> vita_timer{"terrain precache"};
+#endif
 	image::precache_file_existence("terrain/");
 
+#ifdef __vita__
+	vita_timer.reset();
+	vita_timer.emplace("terrain rules parse");
+#endif
 	if(building_rules_.empty() && rules_cfg_) {
 		// off_map first to prevent some default rule seems to block it
 		add_off_map_rule(offmap_image);
@@ -262,6 +274,10 @@ terrain_builder::terrain_builder(const config& level, const gamemap* m, const st
 	// parse local rules
 	parse_config(level);
 
+#ifdef __vita__
+	vita_timer.reset();
+	vita_timer.emplace("terrain rules match");
+#endif
 	if(m)
 		build_terrains();
 }
@@ -432,6 +448,9 @@ static std::vector<std::string> get_variations(const std::string& base, const st
 
 bool terrain_builder::load_images(building_rule& rule)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tb load images"};
+#endif
 	// If the rule has no constraints, it is invalid
 	if(rule.constraints.empty())
 		return false;
@@ -627,6 +646,9 @@ void terrain_builder::replace_rotate_tokens(building_rule& rule, int angle, cons
 
 void terrain_builder::rotate_rule(building_rule& ret, int angle, const std::vector<std::string>& rot)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tb rotate rule"};
+#endif
 	if(rot.size() != 6) {
 		ERR_NG << "invalid rotations";
 		return;
@@ -773,6 +795,9 @@ void terrain_builder::add_constraints(terrain_builder::constraint_set& constrain
 		const config& global_images)
 
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tb add constraints"};
+#endif
 	terrain_constraint& constraint = add_constraints(
 			constraints, loc, t_translation::ter_match(cfg["type"].str(), t_translation::WILDCARD), global_images);
 
@@ -797,6 +822,9 @@ void terrain_builder::add_constraints(terrain_builder::constraint_set& constrain
 void terrain_builder::parse_mapstring(
 		const std::string& mapstring, struct building_rule& br, anchormap& anchors, const config& global_images)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tb parse mapstring"};
+#endif
 	const t_translation::ter_map map = t_translation::read_builder_map(mapstring);
 
 	// If there is an empty map leave directly.
@@ -840,13 +868,27 @@ void terrain_builder::parse_mapstring(
 
 void terrain_builder::add_rule(building_ruleset& rules, building_rule& rule)
 {
+#ifdef __vita__
+	// PS Vita: most of the 17 000 rules (counting their rotations) are for terrains a map does not
+	// have, and loading all their images up front took most of a minute the first time a game
+	// was loaded. A rule without constraints is still invalid now; one without valid images is
+	// found out when it first applies.
+	if(!rule.constraints.empty()) {
+		// Moved, not copied: the callers are done with it (add_rotated_rules() copies the template).
+		rules.insert(std::move(rule));
+	}
+#else
 	if(load_images(rule)) {
 		rules.insert(rule);
 	}
+#endif
 }
 
 void terrain_builder::add_rotated_rules(building_ruleset& rules, building_rule& tpl, const std::string& rotations)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"tb add rotated"};
+#endif
 	if(rotations.empty()) {
 		// Adds the parsed built terrain to the list
 
@@ -1073,6 +1115,15 @@ bool terrain_builder::rule_matches(const terrain_builder::building_rule& rule,
 
 void terrain_builder::apply_rule(const terrain_builder::building_rule& rule, const map_location& loc)
 {
+#ifdef __vita__
+	if(rule.images_state == 0) {
+		// The rule is in a std::multiset, ordered by precedence only, which the images don't touch.
+		rule.images_state = load_images(const_cast<building_rule&>(rule)) ? 1 : -1;
+	}
+	if(rule.images_state < 0) {
+		return;
+	}
+#endif
 	unsigned int rand_seed = get_noise(loc, rule.get_hash());
 
 	for(const terrain_constraint& constraint : rule.constraints) {

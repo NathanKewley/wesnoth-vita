@@ -20,6 +20,10 @@
 
 #include "actions/vision.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "actions/move.hpp"
 
 #include "config.hpp"
@@ -701,6 +705,9 @@ game_events::pump_result_t actor_sighted(const unit & target, const std::vector<
  */
 void recalculate_fog(int side)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"recalculate fog"};
+#endif
 	team &tm = resources::gameboard->get_team(side);
 
 	if (!tm.uses_fog())
@@ -750,6 +757,9 @@ void recalculate_fog(int side)
  */
 bool clear_shroud(int side, bool reset_fog, bool fire_events)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"clear shroud"};
+#endif
 	team &tm = resources::gameboard->get_team(side);
 	if (!tm.uses_shroud() && !tm.uses_fog())
 		return false;

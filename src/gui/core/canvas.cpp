@@ -21,6 +21,9 @@
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
 #include "gui/core/canvas.hpp"
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "gui/core/canvas_private.hpp"
 
 #include "draw.hpp"
@@ -38,6 +41,7 @@
 #include "sdl/utils.hpp" // blur_surface
 #include "video.hpp" // read_pixels_low_res, only used for blurring
 #include "wml_exception.hpp"
+#include <unordered_map>
 
 namespace gui2
 {
@@ -559,10 +563,16 @@ bool canvas::update_blur(const rect& screen_region, bool force)
 	// this widget's location, and blur it.
 	DBG_GUI_D << "Blurring " << screen_region << " depth " << blur_depth_;
 	rect read_region = screen_region;
+#ifdef __vita__
+	const auto blur_start = vita_profile::clock_us();
+#endif
 	auto setter = draw::set_render_target({});
 	surface s = video::read_pixels_low_res(&read_region);
 	s = blur_surface(s, blur_depth_);
 	blur_texture_ = texture(s);
+#ifdef __vita__
+	vita_profile::cost("blur", vita_profile::clock_us() - blur_start);
+#endif
 	deferred_ = false;
 	return true;
 }
@@ -596,11 +606,62 @@ void canvas::draw()
 	// Draw items
 	for(auto& shape : shapes_) {
 		const lg::scope_logger inner_scope_logging_object__{log_gui_draw, "Canvas: draw shape."};
+#ifdef __vita__
+		const auto start = vita_profile::clock_us();
 		shape->draw(variables_);
+		const auto* s = shape.get();
+		vita_profile::cost(dynamic_cast<const text_shape*>(s) ? "text"
+			: dynamic_cast<const image_shape*>(s) ? "image"
+			: dynamic_cast<const line_shape*>(s) ? "line"
+			: dynamic_cast<const rectangle_shape*>(s) ? "rect" : "other", vita_profile::clock_us() - start);
+#else
+		shape->draw(variables_);
+#endif
 	}
 }
 
+#ifdef __vita__
+void canvas::set_shared_cfg(const config& cfg)
+{
+	struct parsed_canvas
+	{
+		std::vector<shape_ptr> shapes;
+		bool blur;
+		unsigned blur_depth;
+	};
+	// By the address of the definition's config, which is never freed or changed.
+	static std::unordered_map<const config*, parsed_canvas> parsed;
+	// The shared shapes outlive the canvas that parsed them: their image actions go by this table
+	// (every canvas's has the same functions).
+	static wfl::action_function_symbol_table shared_functions;
+
+	clear_shapes(false);
+
+	auto it = parsed.find(&cfg);
+	if(it == parsed.end()) {
+		std::vector<shape_ptr> kept;
+		std::swap(kept, shapes_);
+		const unsigned blur_depth = blur_depth_;
+		blur_depth_ = 0;
+		parse_cfg(cfg, shared_functions);
+		it = parsed.emplace(&cfg, parsed_canvas{std::move(shapes_), blur_depth_ != 0, blur_depth_}).first;
+		shapes_ = std::move(kept);
+		blur_depth_ = blur_depth;
+	}
+
+	shapes_.insert(shapes_.end(), it->second.shapes.begin(), it->second.shapes.end());
+	if(it->second.blur) {
+		blur_depth_ = it->second.blur_depth;
+	}
+}
+#endif
+
 void canvas::parse_cfg(const config& cfg)
+{
+	parse_cfg(cfg, functions_);
+}
+
+void canvas::parse_cfg(const config& cfg, wfl::action_function_symbol_table& functions)
 {
 	log_scope2(log_gui_parse, "Canvas: parsing config.");
 
@@ -620,7 +681,7 @@ void canvas::parse_cfg(const config& cfg)
 		} else if(type == "circle") {
 			shapes_.emplace_back(std::make_unique<circle_shape>(data));
 		} else if(type == "image") {
-			shapes_.emplace_back(std::make_unique<image_shape>(data, functions_));
+			shapes_.emplace_back(std::make_unique<image_shape>(data, functions));
 		} else if(type == "text") {
 			shapes_.emplace_back(std::make_unique<text_shape>(data));
 		} else if(type == "pre_commit") {
@@ -663,7 +724,7 @@ void canvas::clear_shapes(const bool force)
 	if(force) {
 		shapes_.clear();
 	} else {
-		auto conditional = [](const std::unique_ptr<shape>& s)->bool { return !s->immutable(); };
+		auto conditional = [](const shape_ptr& s)->bool { return !s->immutable(); };
 
 		auto iter = std::remove_if(shapes_.begin(), shapes_.end(), conditional);
 		shapes_.erase(iter, shapes_.end());

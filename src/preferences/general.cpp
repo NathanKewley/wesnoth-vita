@@ -828,7 +828,14 @@ bool animate_map()
 
 bool animate_water()
 {
+#ifdef __vita__
+	// Off by default on the PS Vita: each frame of animated water and of the waves on coasts is its
+	// own image, masked to each hex shape it appears in. Building those the first time a stretch of
+	// water came into view stalled scrolling, and keeping them all ran the game out of memory.
+	return preferences::get("animate_water", false);
+#else
 	return preferences::get("animate_water", true);
+#endif
 }
 
 bool minimap_movement_coding()
@@ -843,7 +850,14 @@ void toggle_minimap_movement_coding()
 
 bool minimap_terrain_coding()
 {
+#ifdef __vita__
+	// Off by default on the PS Vita: the minimap is redrawn whenever a unit is selected and after
+	// fights, and drawn from the terrain images it took a large part of a second on big maps. The
+	// terrain colours instead are quick, and the minimap is small on this screen anyway.
+	return preferences::get("minimap_terrain_coding", false);
+#else
 	return preferences::get("minimap_terrain_coding", true);
+#endif
 }
 
 void toggle_minimap_terrain_coding()

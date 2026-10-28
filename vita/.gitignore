@@ -1,0 +1,9 @@
+# Build output, logs, the image and sound pack, test runs.
+/build/
+# Dependency sources (downloaded release tarballs) and their builds; the port's changes to them are
+# in deps/patches and deps/overlay.
+/deps/src/
+/deps/build/
+# The Python environment for meson (see deps/build-deps.sh).
+/.venv/
+__pycache__/

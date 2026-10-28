@@ -16,6 +16,10 @@
 
 #include "mouse_events.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "actions/attack.hpp"                // for battle_context, etc
 #include "actions/move.hpp"                  // for move_and_record
 #include "actions/undo.hpp"                  // for undo_list
@@ -346,6 +350,9 @@ void mouse_handler::touch_motion(int x, int y, const bool browse, bool update, m
 
 void mouse_handler::show_reach_for_unit(const unit_ptr& un)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"show reach"};
+#endif
 	if( (!selected_hex_.valid()) && un && current_paths_.destinations.empty() &&
 		 !gui().fogged(un->get_location()))
 	{
@@ -391,6 +398,9 @@ void mouse_handler::show_reach_for_unit(const unit_ptr& un)
 
 void mouse_handler::mouse_motion(int x, int y, const bool browse, bool update, map_location new_hex)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"mouse motion"};
+#endif
 	// we ignore the position coming from event handler
 	// because it's always a little obsolete and we don't need
 	// to highlight all the hexes where the mouse passed.
@@ -1054,6 +1064,9 @@ void mouse_handler::touch_action(const map_location touched_hex, bool browse)
 
 void mouse_handler::select_hex(const map_location& hex, const bool browse, const bool highlight, const bool fire_event)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"select hex"};
+#endif
 	selected_hex_ = hex;
 
 	gui().select_hex(selected_hex_);
@@ -1070,12 +1083,20 @@ void mouse_handler::select_hex(const map_location& hex, const bool browse, const
 		next_unit_ = unit->get_location();
 
 		{
+#ifdef __vita__
+			const vita_profile::scoped_cost vita_timer{"select reach"};
+#endif
 			current_paths_ = pathfind::paths(*unit, false, true, viewing_team(), path_turns_);
 		}
 
-		if(highlight) {
-			show_attack_options(unit);
-			gui().highlight_reach(current_paths_);
+		{
+#ifdef __vita__
+			const vita_profile::scoped_cost vita_timer{"select highlight"};
+#endif
+			if(highlight) {
+				show_attack_options(unit);
+				gui().highlight_reach(current_paths_);
+			}
 		}
 
 		// The highlight now comes from selection
@@ -1086,14 +1107,24 @@ void mouse_handler::select_hex(const map_location& hex, const bool browse, const
 		// Selection have impact only if we are not observing and it's our unit
 		if((!commands_disabled || pc_.get_whiteboard()->is_active()) && unit->side() == gui().viewing_side()) {
 			if(!(browse || pc_.get_whiteboard()->unit_has_actions(&*unit))) {
-				sound::play_UI_sound("select-unit.wav");
+				{
+#ifdef __vita__
+					const vita_profile::scoped_cost vita_timer{"select sound"};
+#endif
+					sound::play_UI_sound("select-unit.wav");
+				}
 
 				unit->anim_comp().set_selecting();
 
 				if(fire_event) {
 					// Ensure unit map is back to normal while event is fired
 					wb::real_map srum;
-					pc_.pump().fire("select", hex);
+					{
+#ifdef __vita__
+						const vita_profile::scoped_cost vita_timer{"select event"};
+#endif
+						pc_.pump().fire("select", hex);
+					}
 					// end forced real unit map
 				}
 			}

@@ -16,6 +16,10 @@
 
 #include "controller_base.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "display.hpp"
 #include "events.hpp"
 #include "game_config_manager.hpp"
@@ -121,8 +125,10 @@ void controller_base::handle_event(const SDL_Event& event)
 			SDL_Event evt = event;
 			evt.type = SDL_TEXTINPUT;
 			hotkey::key_event(evt, get_hotkey_command_executor());
+#ifndef __vita__ // would bring up the system keyboard on the PS Vita
 			SDL_StopTextInput();
 			SDL_StartTextInput();
+#endif
 		}
 		break;
 
@@ -417,9 +423,23 @@ void controller_base::play_slice(bool is_delay_enabled)
 		l->play_slice();
 	}
 
+#ifdef __vita__
+	{
+		const vita_profile::scoped_cost vita_timer{"event pump"};
+		events::pump();
+	}
+	{
+		const vita_profile::scoped_cost vita_timer{"process event"};
+		events::raise_process_event();
+	}
+#else
 	events::pump();
 	events::raise_process_event();
+#endif
 	events::draw();
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"play slice rest"};
+#endif
 
 	// Update sound sources before scrolling
 	if(soundsource::manager* l = get_soundsource_man()) {

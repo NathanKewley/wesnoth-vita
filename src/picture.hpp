@@ -201,6 +201,14 @@ struct light_adjust
  */
 void flush_cache();
 
+#ifdef __vita__
+/**
+ * PS Vita: purges the cached images' pixels, keeping their textures - what is on screen stays quick
+ * to draw. For when memory runs low.
+ */
+void flush_surfaces();
+#endif
+
 /**
  * Image cache manager.
  *

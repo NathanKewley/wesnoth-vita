@@ -15,6 +15,10 @@
 
 #include "game_config_manager.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "about.hpp"
 #include "addon/manager.hpp"
 #include "ai/configuration.hpp"
@@ -188,6 +192,9 @@ void game_config_manager::load_game_config_with_loadscreen(
 
 void game_config_manager::load_game_config(bool reload_everything, const game_classification* classification, const std::string& scenario_id)
 {
+#ifdef __vita__
+	const vita_profile::scoped_log vita_timer{"load game config"};
+#endif
 	// Make sure that 'debug mode' symbol is set
 	// if command line parameter is selected
 	// also if we're in multiplayer and actual debug mode is disabled.

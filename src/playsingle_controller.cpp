@@ -21,6 +21,10 @@
 
 #include "playsingle_controller.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "actions/undo.hpp"
 #include "ai/manager.hpp"
 #include "ai/testing.hpp"
@@ -636,6 +640,9 @@ void playsingle_controller::after_human_turn()
 
 void playsingle_controller::play_ai_turn()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"ai turn"};
+#endif
 	LOG_NG << "is ai...";
 
 	end_turn_enable(false);

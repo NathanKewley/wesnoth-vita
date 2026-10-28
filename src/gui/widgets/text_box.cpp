@@ -369,6 +369,16 @@ void text_box::signal_handler_left_button_down(const event::ui_event event,
 
 	handle_mouse_selection(get_mouse_position(), true);
 
+#ifdef __vita__
+	// Text input on the PS Vita is the system keyboard, so it only comes up when a text box is
+	// tapped, not whenever one has focus. Stopped again when the box loses focus.
+	// It opens with the box's text (the SDL port's hint), and hands back the whole edited text,
+	// which replaces what was there.
+	SDL_SetHint("SDL_VITA_IME_INITIAL_TEXT", get_value().c_str());
+	select_all();
+	SDL_StartTextInput();
+#endif
+
 	handled = true;
 }
 

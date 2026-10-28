@@ -15,6 +15,7 @@
 
 #include "random.hpp"
 #include "log.hpp"
+#include "seed_rng.hpp"
 
 #include <boost/random/random_device.hpp>
 
@@ -41,8 +42,13 @@ namespace {
 			/* Note: do not replace this with std::random_device.
 			 * @cbeck88 told in IRC (2016-10-16) that std::random_device
 			 * is very poorly implemented in MinGW. */
+#ifdef __vita__
+			// No /dev/urandom on the PS Vita; seed_rng uses the kernel's RNG there.
+			gen_.seed(seed_rng::next_seed());
+#else
 			boost::random_device entropy_source;
 			gen_.seed(entropy_source());
+#endif
 		}
 	protected:
 		virtual uint32_t next_random_impl()

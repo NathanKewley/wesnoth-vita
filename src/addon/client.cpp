@@ -33,6 +33,9 @@
 #include "preferences/game.hpp"
 #include "random.hpp"
 #include "serialization/parser.hpp"
+#ifdef __vita__
+#include "filesystem.hpp"
+#endif
 #include "serialization/string_utils.hpp"
 #include "serialization/utf8_exception.hpp"
 #include "utils/parse_network_address.hpp"
@@ -69,8 +72,23 @@ addons_client::addons_client(const std::string& address)
 	}
 }
 
+
+#ifdef __vita__
+/**
+ * PS Vita, for testing in Vita3K, whose network support crashes the emulator: with
+ * ux0:data/wesnoth/vita-addons-list.gz (a server's reply to request_campaign_list, as sent - see
+ * vita/README.md) the add-ons manager shows that list without connecting.
+ */
+static const std::string vita_test_addons_list = "/data/wesnoth/vita-addons-list.gz";
+#endif
+
 void addons_client::connect()
 {
+#ifdef __vita__
+	if(filesystem::file_exists(vita_test_addons_list)) {
+		return;
+	}
+#endif
 	LOG_ADDONS << "connecting to server " << host_ << " on port " << port_;
 
 	utils::string_map i18n_symbols;
@@ -123,13 +141,30 @@ bool addons_client::request_addons_list(config& cfg, bool icons)
 
 	config request;
 	config& req_child = request.add_child("request_campaign_list");
+#ifdef __vita__
+	// PS Vita: no icons. They come inline, many as whole pictures (up to 1024x1024): the list took
+	// over 50 MB more with them, and laying it out never finished.
+	(void)icons;
+	req_child["send_icons"] = false;
+#else
 	req_child["send_icons"] = icons;
+#endif
 
 	/** @todo FIXME: get rid of this legacy "campaign"/"campaigns" silliness
 	 */
 
+#ifdef __vita__
+	if(filesystem::file_exists(vita_test_addons_list)) {
+		filesystem::scoped_istream stream = filesystem::istream_file(vita_test_addons_list);
+		read_gz(response_buf, *stream);
+	} else {
+		send_request(request, response_buf);
+		wait_for_transfer_done(_("Downloading list of add-ons..."));
+	}
+#else
 	send_request(request, response_buf);
 	wait_for_transfer_done(_("Downloading list of add-ons..."));
+#endif
 
 	std::swap(cfg, response_buf.mandatory_child("campaigns"));
 
@@ -338,6 +373,15 @@ bool addons_client::download_addon(config& archive_cfg, const std::string& id, c
 
 	LOG_ADDONS << "downloading " << id;
 
+#ifdef __vita__
+	// Testing in Vita3K (see vita_test_addons_list): any add-on comes from this pack, a server's
+	// reply to request_campaign, saved uncompressed.
+	if(filesystem::file_exists("/data/wesnoth/vita-addon-pack.cfg")) {
+		filesystem::scoped_istream stream = filesystem::istream_file("/data/wesnoth/vita-addon-pack.cfg");
+		read(archive_cfg, *stream);
+		return true;
+	}
+#endif
 	send_request(request_buf, archive_cfg);
 	wait_for_transfer_done(VGETTEXT("Downloading add-on <i>$addon_title</i>...", i18n_symbols));
 

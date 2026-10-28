@@ -40,6 +40,13 @@
 #include <cassert>
 #include <vector>
 
+#ifdef __vita__
+#include "../vita/compat/vita-input.hpp"
+#endif
+#ifdef VITA_DEBUG_SCREENSHOTS
+#include <malloc.h>
+#endif
+
 static lg::log_domain log_display("display");
 #define LOG_DP LOG_STREAM(info, log_display)
 #define ERR_DP LOG_STREAM(err, log_display)
@@ -573,6 +580,37 @@ void render_screen()
 
 	// Copy the render texture to the window.
 	SDL_RenderCopy(*window, render_texture_, nullptr, nullptr);
+
+#ifdef __vita__
+	// The stick-driven pointer: the Vita has no mouse cursor of its own.
+	vita_input::draw_pointer(*window);
+#endif
+
+#ifdef VITA_DEBUG_SCREENSHOTS
+	// PS Vita port debugging: what is on screen every few seconds, saved to the userdata directory,
+	// so a run in the emulator can be checked without anyone watching it. Read from the window:
+	// SDL's GXM renderer cannot read back a render-target texture.
+	{
+		static Uint32 last_shot = 0;
+		static int shot = 0;
+		const Uint32 now = SDL_GetTicks();
+		if(now - last_shot >= 5000) {
+			last_shot = now;
+			int w = 0, h = 0;
+			SDL_GetRendererOutputSize(*window, &w, &h);
+			surface s(w, h);
+			// And how much of the heap is in use, the number that decides whether this fits on a Vita.
+			const struct mallinfo heap = mallinfo();
+			PLAIN_LOG << "[vita] heap: " << heap.uordblks / (1024 * 1024) << " MB in use, "
+				<< heap.arena / (1024 * 1024) << " MB taken from the system";
+			if(SDL_RenderReadPixels(*window, nullptr, s->format->format, s->pixels, s->pitch) == 0) {
+				image::save_image(s, "/data/wesnoth/userdata/vita-shot-" + std::to_string(shot++ % 20) + ".png");
+			} else {
+				ERR_DP << "screenshot failed: " << SDL_GetError();
+			}
+		}
+	}
+#endif
 
 	// Finalize and display the frame.
 	SDL_RenderPresent(*window);

@@ -15,6 +15,10 @@
 
 #include "image_modifications.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "color.hpp"
 #include "config.hpp"
 #include "game_config.hpp"
@@ -26,6 +30,9 @@
 
 #include "formula/formula.hpp"
 #include "formula/callable.hpp"
+
+#include <algorithm>
+#include <cstdio>
 
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
@@ -283,10 +290,72 @@ private:
 	uint32_t w, h;
 };
 
+namespace {
+/**
+ * The engine's own formulas, worked out without the formula interpreter, which costs microseconds a
+ * pixel - over 100 ms an image on slow CPUs, for every animation frame of every unit standing in
+ * water. The results are the same: the interpreter's decimals are integers in thousandths.
+ */
+
+/** The submerge formula display::add_submerge_ipf_mod() writes; @a line is its water line. */
+bool is_submerge_formula(const std::string& formula, int& line)
+{
+	int a = 0, b = 0, length = 0;
+	if(std::sscanf(formula.c_str(), "if(y>%d,clamp((0.3-(y-%d)*0.015),0,1)*alpha,alpha)%n", &a, &b, &length) != 2
+		|| length != static_cast<int>(formula.size()) || a != b) {
+		return false;
+	}
+	line = a;
+	return true;
+}
+
+/**
+ * A ~CHAN() formula that is a whole number or the channel itself (@a own: "red", ...).
+ * @a value is the number, capped at 255, or -1 for the channel unchanged.
+ */
+bool is_simple_channel(const std::string& formula, const char* own, int& value)
+{
+	const std::size_t first = formula.find_first_not_of(" \t");
+	const std::size_t last = formula.find_last_not_of(" \t");
+	if(first == std::string::npos) {
+		return false;
+	}
+	const std::string f = formula.substr(first, last - first + 1);
+	if(f == own) {
+		value = -1;
+		return true;
+	}
+	if(f.size() > 9 || f.find_first_not_of("0123456789") != std::string::npos) {
+		return false;
+	}
+	value = std::min(std::stoi(f), 255);
+	return true;
+}
+} // namespace
+
 surface adjust_alpha_modification::operator()(const surface & src) const
 {
 	if(src == nullptr) {
 		return nullptr;
+	}
+
+	if(int line; is_submerge_formula(formula_, line)) {
+		surface nsurf = src.clone();
+		if(nsurf == nullptr) {
+			PLAIN_LOG << "could not make neutral surface...";
+			return nullptr;
+		}
+		surface_lock lock(nsurf);
+		uint32_t* const pixels = lock.pixels();
+		for(int y = std::max(line + 1, 0); y < nsurf->h; ++y) {
+			// clamp(0.3 - (y - line) * 0.015, 0, 1), in thousandths
+			const int keep = std::clamp(300 - (y - line) * 15, 0, 1000);
+			for(uint32_t* cur = pixels + y * nsurf->w, * const end = cur + nsurf->w; cur != end; ++cur) {
+				const unsigned alpha = std::min<unsigned>(keep * ((*cur) >> 24) / 1000, 255);
+				*cur = (alpha << 24) | ((*cur) & 0x00FFFFFF);
+			}
+		}
+		return nsurf;
 	}
 
 	wfl::formula new_alpha(formula_);
@@ -331,6 +400,29 @@ surface adjust_channels_modification::operator()(const surface & src) const
 {
 	if(src == nullptr) {
 		return nullptr;
+	}
+
+	// Each channel a number or left as it is: ~CHAN(255,255,255,alpha), the units' white flash.
+	if(int r, g, b, a; is_simple_channel(formulas_[0], "red", r) && is_simple_channel(formulas_[1], "green", g)
+		&& is_simple_channel(formulas_[2], "blue", b) && is_simple_channel(formulas_[3], "alpha", a)) {
+		surface nsurf = src.clone();
+		if(nsurf == nullptr) {
+			PLAIN_LOG << "could not make neutral surface...";
+			return nullptr;
+		}
+		surface_lock lock(nsurf);
+		uint32_t mask = 0, set = 0;
+		const int values[4] = {b, g, r, a};
+		for(int i = 0; i < 4; ++i) {
+			if(values[i] >= 0) {
+				mask |= 0xFFu << (8 * i);
+				set |= static_cast<uint32_t>(values[i]) << (8 * i);
+			}
+		}
+		for(uint32_t* cur = lock.pixels(), * const end = cur + nsurf->w * nsurf->h; cur != end; ++cur) {
+			*cur = ((*cur) & ~mask) | set;
+		}
+		return nsurf;
 	}
 
 	wfl::formula new_red(formulas_[0]);
@@ -443,6 +535,12 @@ surface blit_modification::operator()(const surface& src) const
 
 surface mask_modification::operator()(const surface& src) const
 {
+#ifdef __vita__
+	// Pixels masked, in thousands where the profile shows ms: big images or many small ones?
+	if(src) {
+		vita_profile::cost("mask kpx", src->w * src->h);
+	}
+#endif
 	if(src->w == mask_->w &&  src->h == mask_->h && x_ == 0 && y_ == 0) {
 		return mask_surface(src, mask_);
 	}

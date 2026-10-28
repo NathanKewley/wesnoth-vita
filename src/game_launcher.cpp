@@ -57,11 +57,13 @@
 #include "wesnothd_connection_error.hpp"
 #include "wml_exception.hpp" // for wml_exception
 
+#ifndef __vita__ // PS Vita: wesnothd cannot be launched
 #if BOOST_VERSION >= 108800 // v2 is now default
 #  define BOOST_PROCESS_VERSION 1
 #  include <boost/process/v1/child.hpp>
 #else
 #  include <boost/process.hpp>
+#endif
 #endif
 
 #ifdef _WIN32
@@ -106,7 +108,9 @@ static lg::log_domain log_network("network");
 static lg::log_domain log_enginerefac("enginerefac");
 #define LOG_RG LOG_STREAM(info, log_enginerefac)
 
+#ifndef __vita__
 namespace bp = boost::process;
+#endif
 
 game_launcher::game_launcher(const commandline_options& cmdline_opts)
 	: cmdline_opts_(cmdline_opts)
@@ -215,6 +219,9 @@ game_launcher::game_launcher(const commandline_options& cmdline_opts)
 		gui2::new_widgets = true;
 	if(cmdline_opts_.nodelay)
 		game_config::no_delay = true;
+	// --exit-at-end was read but never applied, so the game always waited at the end screen.
+	if(cmdline_opts_.multiplayer_exit_at_end)
+		game_config::exit_at_end = true;
 	if(cmdline_opts_.nomusic)
 		no_music = true;
 	if(cmdline_opts_.nosound)
@@ -838,6 +845,10 @@ bool game_launcher::goto_editor()
 
 void game_launcher::start_wesnothd()
 {
+#ifdef __vita__
+	// No separate processes on the Vita, so no local server to host a game on.
+	throw game::mp_server_error("Hosting a local server is not supported on the PS Vita");
+#else
 	std::string wesnothd_program = preferences::get_mp_server_program_name().empty()
 		? filesystem::get_exe_dir() + "/" + filesystem::get_program_invocation("wesnothd")
 		: preferences::get_mp_server_program_name();
@@ -869,6 +880,7 @@ void game_launcher::start_wesnothd()
 		WRN_GENERAL << "Failed to start server " << wesnothd_program << ":\n" << e.what();
 		throw game::mp_server_error("Starting MP server failed!");
 	}
+#endif
 }
 
 bool game_launcher::play_multiplayer(mp_mode mode)

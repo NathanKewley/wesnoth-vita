@@ -17,6 +17,11 @@
 
 #include "gui/dialogs/game_load.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include <optional>
+#endif
+
 #include "desktop/open.hpp"
 #include "filesystem.hpp"
 #include "font/pango/escape.hpp"
@@ -96,6 +101,9 @@ game_load::game_load(const game_config_view& cache_config, savegame::load_game_m
 
 void game_load::pre_show(window& window)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"load dialog open"};
+#endif
 	// Allow deleting saves with the Delete key.
 	connect_signal_pre_key_press(window, std::bind(&game_load::key_press_callback, this, std::placeholders::_5));
 
@@ -156,6 +164,9 @@ void game_load::set_save_dir_list(menu_button& dir_list)
 
 void game_load::populate_game_list()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"load dialog list"};
+#endif
 	listbox& list = find_widget<listbox>(get_window(), "savegame_list", false);
 
 	list.clear();
@@ -182,11 +193,28 @@ void game_load::populate_game_list()
 
 void game_load::display_savegame_internal(const savegame::save_info& game)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"save selected"};
+#endif
 	filename_ = game.name();
+#ifdef __vita__
+	{
+		const vita_profile::scoped_cost vita_summary_read_timer{"save summary read"};
+		summary_  = game.summary();
+	}
+#else
 	summary_  = game.summary();
+#endif
 
+#ifdef __vita__
+	{
+		const vita_profile::scoped_cost vita_minimap_timer{"save minimap"};
+#endif
 	find_widget<minimap>(get_window(), "minimap", false)
 			.set_map_data(summary_["map_data"]);
+#ifdef __vita__
+	}
+#endif
 
 	find_widget<label>(get_window(), "lblScenario", false)
 			.set_label(summary_["label"]);
@@ -195,6 +223,9 @@ void game_load::display_savegame_internal(const savegame::save_info& game)
 
 	leader_list.clear();
 
+#ifdef __vita__
+	auto vita_leaders_timer = std::make_optional<vita_profile::scoped_cost>("save leaders");
+#endif
 	const std::string sprite_scale_mod = (formatter() << "~SCALE_INTO(" << game_config::tile_size << ',' << game_config::tile_size << ')').str();
 
 	for(const auto& leader : summary_.child_range("leader")) {
@@ -238,13 +269,27 @@ void game_load::display_savegame_internal(const savegame::save_info& game)
 		leader_list.add_row(data);
 	}
 
+#ifdef __vita__
+	vita_leaders_timer.reset();
+	auto vita_summary_timer = std::make_optional<vita_profile::scoped_cost>("save summary");
+#endif
 	std::stringstream str;
 	str << game.format_time_local() << "\n";
 	evaluate_summary_string(str, summary_);
+#ifdef __vita__
+	vita_summary_timer.reset();
+	auto vita_label_timer = std::make_optional<vita_profile::scoped_cost>("save label");
+#endif
 
 	// The new label value may have more or less lines than the previous value, so invalidate the layout.
 	find_widget<scroll_label>(get_window(), "slblSummary", false).set_label(str.str());
+#ifndef __vita__
+	// (PS Vita: the scroll label lays its new text out itself; the whole window doesn't need to.)
 	get_window()->invalidate_layout();
+#endif
+#ifdef __vita__
+	vita_label_timer.reset();
+#endif
 
 	toggle_button& replay_toggle            = dynamic_cast<toggle_button&>(*show_replay_->get_widget());
 	toggle_button& cancel_orders_toggle     = dynamic_cast<toggle_button&>(*cancel_orders_->get_widget());

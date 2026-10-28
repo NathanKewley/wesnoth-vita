@@ -21,6 +21,11 @@
 
 #include "gui/dialogs/loading_screen.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#include <cstdio>
+#endif
+
 #include "cursor.hpp"
 #include "draw_manager.hpp"
 #include "gettext.hpp"
@@ -119,6 +124,14 @@ void loading_screen::post_show(window& /*window*/)
 
 void loading_screen::progress(loading_stage stage)
 {
+#ifdef __vita__
+	// When each stage starts, from the game's start: where loading time goes.
+	if(stage != loading_stage::none) {
+		const auto name = stage_names.find(stage);
+		std::fprintf(stderr, "[vita] at %llu ms: %s\n", vita_profile::clock_us() / 1000,
+			name != stage_names.end() ? name->second.c_str() : "?");
+	}
+#endif
 	if(singleton_ && stage != loading_stage::none) {
 		singleton_->current_stage_.store(stage, std::memory_order_release);
 		// Allow display to update, close events to be handled, etc.

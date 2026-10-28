@@ -17,6 +17,10 @@
 
 #include "gui/gui.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "config_cache.hpp"
 #include "filesystem.hpp"
 #include "gettext.hpp"
@@ -49,12 +53,21 @@ void init()
 	//
 	config cfg;
 	try {
+#ifdef __vita__
+		// PS Vita: through the config cache, without the schema check. Preprocessing and checking
+		// the GUI's WML on every start took a large part of the start-up; the cache has it ready
+		// after the first. The check only matters to people changing those files.
+		const vita_profile::scoped_log vita_timer{"gui wml"};
+		game_config::config_cache_transaction transaction;
+		game_config::config_cache::instance().get_config(filesystem::get_wml_location("gui/_main.cfg"), cfg);
+#else
 		schema_validation::schema_validator validator(filesystem::get_wml_location("schema/gui.cfg"));
 
 		preproc_map preproc(game_config::config_cache::instance().get_preproc_map());
 		filesystem::scoped_istream stream = preprocess_file(filesystem::get_wml_location("gui/_main.cfg"), &preproc);
 
 		read(cfg, *stream, &validator);
+#endif
 	} catch(const config::error& e) {
 		ERR_GUI_P << e.what();
 		ERR_GUI_P << "Setting: could not read file 'data/gui/_main.cfg'.";
@@ -66,6 +79,9 @@ void init()
 	//
 	// Parse GUI definitions.
 	//
+#ifdef __vita__
+	const vita_profile::scoped_log vita_definitions_timer{"gui definitions"};
+#endif
 	const std::string& current_theme = preferences::gui_theme();
 
 	for(const config& g : cfg.child_range("gui")) {

@@ -20,6 +20,10 @@
 
 #include "actions/attack.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "actions/advancement.hpp"
 #include "actions/vision.hpp"
 
@@ -920,6 +924,9 @@ void attack::fire_event(const std::string& n)
 
 void attack::refresh_bc()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"battle context"};
+#endif
 	// Fix index of weapons.
 	if(a_.valid()) {
 		refresh_weapon_index(a_.weapon_, a_.weap_id_, a_.get_unit().attacks());
@@ -1559,6 +1566,9 @@ void attack_unit_and_advance(const map_location& attacker,
 		int defend_with,
 		bool update_display)
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"attack"};
+#endif
 	attack_unit(attacker, defender, attack_with, defend_with, update_display);
 
 	unit_map::const_iterator atku = resources::gameboard->units().find(attacker);

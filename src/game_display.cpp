@@ -20,6 +20,10 @@
 
 #include "game_display.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
+
 #include "gettext.hpp"
 #include "wesconfig.h"
 
@@ -177,6 +181,9 @@ void game_display::scroll_to_leader(int side, SCROLL_TYPE scroll_type,bool force
 
 void game_display::update()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"display update"};
+#endif
 	display::update();
 
 	if (std::shared_ptr<wb::manager> w = wb_.lock()) {
@@ -351,17 +358,42 @@ bool game_display::has_time_area() const
 
 void game_display::layout()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"reports"};
+#endif
 	display::layout();
 
 	if ( !team_valid() )
 		return;
 
+#ifdef __vita__
+	// The clock, battery and turn timer change at most once a second; building their reports every
+	// frame took over a millisecond of each one on the Vita.
+	static uint32_t last_timed_reports = 0;
+	if(const uint32_t now = SDL_GetTicks(); last_timed_reports == 0 || now - last_timed_reports >= 1000) {
+		last_timed_reports = now;
+		refresh_report("report_clock");
+		refresh_report("report_battery");
+		refresh_report("report_countdown");
+	}
+#else
 	refresh_report("report_clock");
 	refresh_report("report_battery");
 	refresh_report("report_countdown");
+#endif
 
+#ifdef __vita__
+	// All the sidebar's reports at once take a few milliseconds; in fights they were asked for every
+	// frame, as the hitpoints change. A tenth of a second late is not noticeable.
+	static uint32_t last_status_reports = 0;
+	const uint32_t status_now = SDL_GetTicks();
+	if (invalidateGameStatus_ && status_now - last_status_reports >= 100)
+	{
+		last_status_reports = status_now;
+#else
 	if (invalidateGameStatus_)
 	{
+#endif
 		wb::future_map future; // start planned unit map scope
 
 		// We display the unit the mouse is over if it is over a unit,

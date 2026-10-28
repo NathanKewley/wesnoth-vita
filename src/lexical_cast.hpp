@@ -46,6 +46,7 @@
 
 #include <cstdlib>
 #include <limits>
+#include <cctype>
 #include <string>
 #include <sstream>
 #include <type_traits>
@@ -59,6 +60,25 @@
  * directly.
  */
 namespace implementation {
+
+/**
+ * Whether std::sto[u]l[l] could accept @p value: optional leading whitespace, an optional sign, then
+ * a digit. When not, they throw std::invalid_argument, which some callers hit thousands of times
+ * (terrain builder maps are mostly letters) - costly on platforms with slow exceptions, the PS Vita
+ * among them.
+ */
+inline bool could_be_integer(const std::string& value)
+{
+	std::size_t i = 0;
+	while(i < value.size() && std::isspace(static_cast<unsigned char>(value[i]))) {
+		++i;
+	}
+	if(i < value.size() && (value[i] == '+' || value[i] == '-')) {
+		++i;
+	}
+	return i < value.size() && std::isdigit(static_cast<unsigned char>(value[i]));
+}
+
 
 	template<
 		  typename To
@@ -228,7 +248,9 @@ struct lexical_caster<
 			}
 		}
 
-		try {
+		if(!implementation::could_be_integer(value)) {
+			// Not a number: skip the throw and catch below, which is slow where exceptions are.
+		} else try {
 			return std::stoll(value);
 		} catch(const std::invalid_argument&) {
 		} catch(const std::out_of_range&) {
@@ -291,7 +313,9 @@ struct lexical_caster<
 			}
 		}
 
-		try {
+		if(!implementation::could_be_integer(value)) {
+			// Not a number: skip the throw and catch below, which is slow where exceptions are.
+		} else try {
 			long res = std::stol(value);
 			if(std::numeric_limits<To>::lowest() <= res && std::numeric_limits<To>::max() >= res) {
 				return static_cast<To>(res);
@@ -436,7 +460,9 @@ struct lexical_caster<
 			}
 		}
 
-		try {
+		if(!implementation::could_be_integer(value)) {
+			// Not a number: skip the throw and catch below, which is slow where exceptions are.
+		} else try {
 			return std::stoull(value);
 		} catch(const std::invalid_argument&) {
 		} catch(const std::out_of_range&) {
@@ -499,7 +525,9 @@ struct lexical_caster<
 			}
 		}
 
-		try {
+		if(!implementation::could_be_integer(value)) {
+			// Not a number: skip the throw and catch below, which is slow where exceptions are.
+		} else try {
 			unsigned long res = std::stoul(value);
 			// No need to check the lower bound, it's zero for all unsigned types.
 			if(std::numeric_limits<To>::max() >= res) {

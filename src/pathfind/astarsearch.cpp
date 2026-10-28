@@ -15,6 +15,10 @@
 */
 
 #include "log.hpp"
+
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "map/map.hpp"
 #include "pathfind/pathfind.hpp"
 #include "pathfind/teleport.hpp"
@@ -141,6 +145,9 @@ plain_route a_star_search(const map_location& src, const map_location& dst,
                           double stop_at, const cost_calculator& calc,
                           const std::size_t width, const std::size_t height,
                           const teleport_map *teleports, bool border) {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"a star"};
+#endif
 	//----------------- PRE_CONDITIONS ------------------
 	assert(src.valid(width, height, border));
 	assert(dst.valid(width, height, border));

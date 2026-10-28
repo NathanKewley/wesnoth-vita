@@ -26,6 +26,7 @@
 #include "formula/function.hpp"
 #include "sdl/texture.hpp"
 #include "sdl/rect.hpp"
+#include <memory>
 
 namespace wfl { class variant; }
 struct point;
@@ -83,6 +84,13 @@ public:
 		bool immutable_;
 	};
 
+#ifdef __vita__
+	/** Shared between canvases with the same definition (see set_shared_cfg()). */
+	using shape_ptr = std::shared_ptr<shape>;
+#else
+	using shape_ptr = std::unique_ptr<shape>;
+#endif
+
 	canvas();
 	canvas(const canvas&) = delete;
 	canvas& operator=(const canvas&) = delete;
@@ -124,6 +132,16 @@ public:
 		parse_cfg(cfg);
 	}
 
+#ifdef __vita__
+	/**
+	 * PS Vita: set_cfg() for a canvas from a widget definition, which lives as long as the program.
+	 * Its shapes are parsed once and shared by every widget made from that definition; they hold
+	 * nothing of their own while drawing. Parsed again for each widget, they took more memory than
+	 * the Vita has for a list of a few hundred rows (the add-ons manager).
+	 */
+	void set_shared_cfg(const config& cfg);
+#endif
+
 	/**
 	 * Appends data to the config.
 	 *
@@ -158,7 +176,7 @@ public:
 
 private:
 	/** Vector with the shapes to draw. */
-	std::vector<std::unique_ptr<shape>> shapes_;
+	std::vector<shape_ptr> shapes_;
 
 	/**
 	 * The depth of the blur to use in the pre committing.
@@ -201,6 +219,9 @@ private:
 	 * @param cfg                 The config object with the data to draw, see @ref GUICanvasWML
 	 */
 	void parse_cfg(const config& cfg);
+
+	/** As parse_cfg(), with the function table images' actions are evaluated with. */
+	void parse_cfg(const config& cfg, wfl::action_function_symbol_table& functions);
 
 	void clear_shapes(const bool force);
 };

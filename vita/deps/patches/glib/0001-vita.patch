@@ -1,0 +1,113 @@
+--- a/meson.build	2025-02-21 00:08:16.000000000 +1100
++++ b/meson.build	2026-10-25 22:58:19.810221866 +1100
+@@ -2621,9 +2621,15 @@
+ subdir('gobject')
+ subdir('gthread')
+ subdir('gmodule')
+-subdir('gio')
+-subdir('girepository')
+-subdir('fuzzing')
++# PS Vita: no sockets, resolver, file monitoring or D-Bus to build GIO on. Pango only needs
++# GListModel from it, which gio-lite provides.
++if host_system == 'vita'
++  subdir('gio-lite')
++else
++  subdir('gio')
++  subdir('girepository')
++  subdir('fuzzing')
++endif
+ subdir('tests')
+ 
+ # xgettext is optional (on Windows for instance)
+--- a/glib/meson.build	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/meson.build	2026-10-25 22:58:19.810713847 +1100
+@@ -257,6 +257,11 @@
+   install_headers(glib_win32_headers, install_dir : glib_sub_includedir)
+ endif
+ 
++# PS Vita: stubs for the POSIX calls newlib lacks (see vita-posix-stubs.c).
++if host_system == 'vita'
++  glib_sources += files('vita-posix-stubs.c')
++endif
++
+ glib_deprecated_sources = files(
+   'deprecated/gallocator.c',
+   'deprecated/gcache.c',
+--- a/glib/glib-init.c	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/glib-init.c	2026-10-25 22:58:19.811028208 +1100
+@@ -73,12 +73,17 @@
+     TEST_INT32_MIN = G_MININT32,
+     TEST_INT32_MAX = G_MAXINT32
+ } TestInt;
++/* PS Vita: the platform ABI has short enums (__ARM_SIZEOF_MINIMAL_ENUM == 1), and SDL and the
++ * rest of the SDK are built that way, so glib has to be too. Enums reach glib as int-promoted
++ * arguments, so only code storing an enum through a gint pointer is affected. */
++#ifndef __vita__
+ G_STATIC_ASSERT (sizeof (TestChar) == sizeof (int));
+ G_STATIC_ASSERT (sizeof (TestShort) == sizeof (int));
+ G_STATIC_ASSERT (sizeof (TestInt) == sizeof (int));
+ G_STATIC_ASSERT (G_ALIGNOF (TestChar) == G_ALIGNOF (int));
+ G_STATIC_ASSERT (G_ALIGNOF (TestShort) == G_ALIGNOF (int));
+ G_STATIC_ASSERT (G_ALIGNOF (TestInt) == G_ALIGNOF (int));
++#endif
+ 
+ G_STATIC_ASSERT (sizeof (gchar) == 1);
+ G_STATIC_ASSERT (sizeof (guchar) == 1);
+--- a/glib/ghostutils.c	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/ghostutils.c	2026-10-25 22:58:19.811843769 +1100
+@@ -416,7 +416,7 @@
+ #ifdef HOST_NAME_MAX
+   return HOST_NAME_MAX;
+ #else
+-  return _POSIX_HOST_NAME_MAX;
++  return 255; /* PS Vita: newlib defines neither HOST_NAME_MAX nor _POSIX_HOST_NAME_MAX */
+ #endif /* HOST_NAME_MAX */
+ #else
+   /* Fallback to some reasonable value
+--- a/glib/gutils.c	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/gutils.c	2026-10-25 22:58:19.812258020 +1100
+@@ -1084,7 +1084,7 @@
+ #ifdef HOST_NAME_MAX
+           size = HOST_NAME_MAX + 1;
+ #else
+-          size = _POSIX_HOST_NAME_MAX + 1;
++          size = 256; /* PS Vita: newlib has no _POSIX_HOST_NAME_MAX */
+ #endif /* HOST_NAME_MAX */
+       }
+ #else
+--- a/glib/gthread.c	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/gthread.c	2026-10-25 22:58:19.812769961 +1100
+@@ -1147,7 +1147,7 @@
+ 
+   if (count > 0)
+     return count;
+-#elif defined(_SC_NPROCESSORS_ONLN) && defined(THREADS_POSIX) && defined(HAVE_PTHREAD_GETAFFINITY_NP)
++#elif defined(_SC_NPROCESSORS_ONLN) && defined(THREADS_POSIX) && defined(HAVE_PTHREAD_GETAFFINITY_NP) && defined(CPU_SETSIZE)
+   {
+     int ncores = MIN (sysconf (_SC_NPROCESSORS_ONLN), CPU_SETSIZE);
+     cpu_set_t cpu_mask;
+--- a/glib/gthread-posix.c	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/gthread-posix.c	2026-10-25 22:58:19.813088371 +1100
+@@ -751,7 +751,9 @@
+     }
+ #endif /* HAVE_PTHREAD_ATTR_SETSTACKSIZE */
+ 
+-#ifdef HAVE_PTHREAD_ATTR_SETINHERITSCHED
++/* PS Vita: an inherited priority comes out invalid there (SCE_KERNEL_ERROR_ILLEGAL_PRIORITY), and
++ * every thread glib starts - Pango's fontconfig thread among them - fails; the default works. */
++#if defined(HAVE_PTHREAD_ATTR_SETINHERITSCHED) && !defined(__vita__)
+     {
+       /* While this is the default, better be explicit about it */
+       pthread_attr_setinheritsched (&attr, PTHREAD_INHERIT_SCHED);
+--- a/glib/gnulib/meson.build	2025-02-21 00:08:16.000000000 +1100
++++ b/glib/gnulib/meson.build	2026-10-25 22:59:25.812183805 +1100
+@@ -378,7 +378,8 @@
+ gnulib_lib = static_library('gnulib', gnulib_sources,
+   dependencies : [libm],
+   include_directories : [configinc, glibinc, include_directories ('.')],
+-  pic : true,
++  # PS Vita: no position-independent code, see vita-cross.ini.
++  pic : host_system != 'vita',
+   c_args : ['-DGCC_LINT=1', '-DLIBDIR="@0@"'.format(glib_libdir), '-DG_LOG_DOMAIN="GLib"',
+             glib_c_args_internal, extra_gnulib_args],
+   gnu_symbol_visibility : 'hidden',

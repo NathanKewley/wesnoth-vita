@@ -20,6 +20,9 @@
 
 #include "display.hpp"
 
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "arrow.hpp"
 #include "color.hpp"
 #include "cursor.hpp"
@@ -1657,6 +1660,9 @@ void display::announce(const std::string& message, const color_t& color, const a
 
 void display::recalculate_minimap()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"minimap"};
+#endif
 	if(video::headless()) {
 		return;
 	}
@@ -2401,6 +2407,9 @@ void display::clear_redraw_observers()
 
 void display::draw()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"map draw"};
+#endif
 	if(video::headless()) {
 		DBG_DP << "display::draw denied";
 		return;
@@ -2485,6 +2494,9 @@ void display::layout()
 
 void display::render()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"map render"};
+#endif
 	// This should render the game map and units.
 	// It is not responsible for halos and floating labels.
 	//DBG_DP << "display::render";
@@ -2644,6 +2656,11 @@ rect display::get_clip_rect() const
 
 void display::draw_invalidated()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"draw invalidated"};
+	// Hexes redrawn, in thousands where the profile shows ms.
+	vita_profile::cost("hexes", invalidated_.size());
+#endif
 	//	log_scope("display::draw_invalidated");
 	SDL_Rect clip_rect = get_clip_rect();
 	const auto clipper = draw::reduce_clip(clip_rect);
@@ -2673,6 +2690,9 @@ void display::draw_invalidated()
 			const auto request = exclusive_unit_draw_requests_.find(loc);
 
 			if(u_it != dc_->units().end() && (request == exclusive_unit_draw_requests_.end() || request->second == u_it->id())) {
+#ifdef __vita__
+				const vita_profile::scoped_cost vita_unit_timer{"redraw unit"};
+#endif
 				drawer->redraw_unit(*u_it);
 			}
 		}
@@ -2695,6 +2715,9 @@ void display::draw_hex(const map_location& loc)
 
 	// unshrouded terrain (the normal case)
 	if(!is_shrouded) {
+#ifdef __vita__
+		const vita_profile::scoped_cost vita_timer{"terrain images"};
+#endif
 		get_terrain_images(loc, tod.id, BACKGROUND); // updates terrain_image_vector_
 		num_images_bg = terrain_image_vector_.size();
 
@@ -2918,7 +2941,19 @@ void display::refresh_report(const std::string& report_name, const config * new_
 
 	reports::context temp_context = reports::context(*dc_, *this, *resources::tod_manager, wb_.lock(), mhb);
 
+#ifdef __vita__
+	// Each report timed under its own name ("report unit_weapons", ...), kept for the profiler.
+	static std::map<std::string, std::string> report_timer_names;
+	std::string& timer_name = report_timer_names[report_name];
+	if(timer_name.empty()) {
+		timer_name = "report " + report_name;
+	}
+	const auto report_start = vita_profile::clock_us();
+#endif
 	const config generated_cfg = new_cfg ? config() : reports_object_->generate_report(report_name, temp_context);
+#ifdef __vita__
+	vita_profile::cost(timer_name.c_str(), vita_profile::clock_us() - report_start);
+#endif
 	if ( new_cfg == nullptr )
 		new_cfg = &generated_cfg;
 
@@ -3230,6 +3265,9 @@ void display::invalidate_animations_location(const map_location& loc)
 
 void display::invalidate_animations()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"animations"};
+#endif
 	// There are timing issues with this, but i'm not touching it.
 	new_animation_frame();
 	animate_map_ = preferences::animate_map();
@@ -3256,6 +3294,14 @@ void display::invalidate_animations()
 	do {
 		new_inval = false;
 		for(const unit& u : dc_->units()) {
+#ifdef __vita__
+			// Units nowhere near the screen can't touch what is drawn (refresh() above skips them
+			// too), and working out what each one's animation covers took milliseconds a frame on
+			// big maps. Hexes scrolled into view are redrawn whole anyway.
+			if(!tile_nearly_on_screen(u.get_location())) {
+				continue;
+			}
+#endif
 			new_inval |= u.anim_comp().invalidate(*this);
 		}
 		for(const unit* u : *fake_unit_man_) {

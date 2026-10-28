@@ -150,7 +150,8 @@ endif()
 
 ########### Conf Tests ###########
 
-if((ENABLE_GAME OR ENABLE_TESTS) AND NOT MSVC)
+# Not when cross-compiling for the PS Vita: these run on the build machine.
+if((ENABLE_GAME OR ENABLE_TESTS) AND NOT MSVC AND NOT VITA)
 	# test for SDL2
 	add_executable(sdl2 conftests/sdl2.cpp)
 	set_target_properties(sdl2 PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/Testing)
@@ -275,6 +276,11 @@ if(ENABLE_GAME)
 	endif()
 
 	set_target_properties(wesnoth PROPERTIES OUTPUT_NAME ${BINARY_PREFIX}wesnoth${BINARY_SUFFIX})
+
+	if(VITA)
+		# PS Vita: extra libraries and packaging as a .vpk; see vita/README.md.
+		include(${CMAKE_SOURCE_DIR}/vita/wesnoth-vita.cmake)
+	endif()
 
 	install(TARGETS wesnoth DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

@@ -20,6 +20,10 @@
  */
 
 #include "pathfind/pathfind.hpp"
+
+#ifdef __vita__
+#include "../vita/compat/vita-profile.hpp"
+#endif
 #include "pathfind/teleport.hpp"
 
 #include "display.hpp"
@@ -534,6 +538,9 @@ paths::paths(const unit& u, bool force_ignore_zoc,
 		int additional_turns, bool see_all, bool ignore_units)
 	: destinations()
 {
+#ifdef __vita__
+	const vita_profile::scoped_cost vita_timer{"find routes"};
+#endif
 	try {
 		find_routes(
 			u.get_location(),

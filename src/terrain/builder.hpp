@@ -422,6 +422,15 @@ private:
 		 */
 		constraint_set constraints;
 
+#ifdef __vita__
+		/**
+		 * PS Vita: the images are loaded the first time the rule applies (apply_rule()), not when
+		 * it is added: 1 once loaded, -1 when the rule turned out to have none (it then never
+		 * applies, as if it had not been added), 0 before.
+		 */
+		mutable int images_state = 0;
+#endif
+
 		/**
 		 * The location on which this map may match.
 		 * Set to a valid map_location if the "x" and "y" parameters

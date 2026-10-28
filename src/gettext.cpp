@@ -519,8 +519,10 @@ int compare(const std::string& s1, const std::string& s2)
 int icompare(const std::string& s1, const std::string& s2)
 {
 	// todo: maybe we should replace this preprocessor check with a std::has_facet<bl::collator<char>> check?
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__vita__)
 	// https://github.com/wesnoth/wesnoth/issues/2094
+	// PS Vita: Boost.Locale's std backend has no collator there, and the fallback below throws and
+	// catches on every comparison - slow on the Vita's CPU when sorting long lists.
 	return compare(ascii_to_lowercase(s1), ascii_to_lowercase(s2));
 #else
 
