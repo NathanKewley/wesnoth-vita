@@ -3,7 +3,9 @@
 This is a fork of [The Battle for Wesnoth](https://github.com/wesnoth/wesnoth) 1.18 ported the the PS Vita.
 
 * This is a vibe coded port
-* A lot of testing and performance tuning has been done. We run at mostly 60FPS now.
+* Based off 1.18 (March 2024) since its the last version using SDL2. I think porting a newer version is a much more significant undertaking
+* A lot of testing and performance tuning has been done. We run at mostly 60FPS now. Certain events do cause a slowdown or small freeze.
+* First load is slow as Wesnoth does some first run stuff. Loading times can be slow. Please be patient, it will load and run.
 * Played through a number of different skirmish maps of different sizes along with the first few missions of `The Rise of Wesnoth` with no issues. 
 
 What is not tested:
